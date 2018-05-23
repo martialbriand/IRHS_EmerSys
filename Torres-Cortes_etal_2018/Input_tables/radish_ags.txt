@@ -1,0 +1,10 @@
+sample	AGS	stage
+RS1	1094945.57537	raSeeds
+RS2	1130750.45607	raSeeds
+RS3	1128555.97139	raSeeds
+RG1	2052069.28382	rbGerminating
+RG2	1789288.57328	rbGerminating
+RG3	2820170.58371	rbGerminating
+RP1	1857863.93446	rcSeedlings
+RP2	2069584.22807	rcSeedlings
+RP3	1854911.77936	rcSeedlings
