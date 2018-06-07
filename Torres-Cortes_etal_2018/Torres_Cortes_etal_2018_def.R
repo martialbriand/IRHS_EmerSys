@@ -475,16 +475,16 @@ phylum_colors <- c(
   "#8569D5", "#5E738F","#D1A33D", "#8A7C64", "#599861"
 )
 
-ptaxbean2 <- plot_composition(bean2, "Category", "Broad", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)+ scale_fill_manual(values = phylum_colors)
+ptaxbean2 <- plot_composition(bean2, "Kingdom", "Bacteria", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)+ scale_fill_manual(values = phylum_colors)
 (ptaxbean2)
-ptaxrad2 <- plot_composition(radish2, "Category", "Broad", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)+ scale_fill_manual(values = phylum_colors)
+ptaxrad2 <- plot_composition(radish2, "Kingdom", "Bacteria", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)+ scale_fill_manual(values = phylum_colors)
 (ptaxrad2)
 graph_func_man <- grid.arrange(ptaxbean2, ptaxrad2, nrow=2, ncol=1)
 
 
-ptaxbean2 <- plot_composition(bean2, "Category", "Broad", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)
+ptaxbean2 <- plot_composition(bean2, "Kingdom", "Bacteria", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)
 (ptaxbean2)
-ptaxrad2 <- plot_composition(radish2, "Category", "Broad", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)
+ptaxrad2 <- plot_composition(radish2, "Kingdom", "Bacteria", "Class", numberOfTaxa=15, fill="Class") + facet_wrap(~Stage, scales="free_x", nrow=1)
 (ptaxrad2)
 graph_func_man <- grid.arrange(ptaxbean2, ptaxrad2, nrow=2, ncol=1)
 
@@ -538,14 +538,14 @@ ggsave("top10-cog.pdf", plot = graph_gen, width = 11, height = 8)
 gen.bean3 <-amp_rabund(data = per.bean2,
                        order.group = c("Seed", "Germinating", "Seedling"),
                        tax.aggregate = "Class",
-                       tax.show = c("K","G","M", "E", "T", "P", "L", "C", "N"),
+                       tax.show = c("K","G","M", "E", "T", "P", "L", "C"),
                        scale.seq = 100,
                        group = "Stage")
 
 gen.rad3 <-amp_rabund(data = per.rad2,
                       order.group = c("Seed", "Germinating", "Seedling"),
                       tax.aggregate = "Class",
-                      tax.show = c("U", "K", "G", "O", "T", "L", "J", "E", "N"),
+                      tax.show = c("U", "K", "G", "O", "T", "L", "J", "E"),
                       scale.seq = 100,
                       group = "Stage")
 
@@ -671,16 +671,6 @@ beandf2 = ggplot(sigtabf2, aes(x=Class, y=log2FoldChange, color=log2FoldChange))
   scale_color_gradient2(limits= c(-10, 10), low="blue", mid= "grey", high="red")
 (beandf2)
 
-#COG order
-x = tapply(sigtabf2$log2FoldChange, sigtabf2$COG, function(x) max(x))
-x = sort(x, TRUE)
-sigtabf2$COG = factor(as.character(sigtabf2$COG), levels=names(x))
-
-beandf2 = ggplot(sigtabf2, aes(x=COG, y=log2FoldChange, color=log2FoldChange)) + geom_point(size=6) + 
-  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) + 
-  ylim(-10, +10) +
-  scale_color_gradient2(limits= c(-10, 10), low="blue", mid= "grey", high="red")
-(beandf2)
 
 
 #Radish
@@ -722,16 +712,6 @@ raddf = ggplot(sigtabf2, aes(x=Class, y=log2FoldChange, color=log2FoldChange)) +
   scale_color_gradient2(limits= c(-10, 10), low="blue", mid= "grey", high="red")
 (raddf)
 
-#COG order
-x = tapply(sigtabf2$log2FoldChange, sigtabf2$COG, function(x) max(x))
-x = sort(x, TRUE)
-sigtabf2$COG = factor(as.character(sigtabf2$COG), levels=names(x))
-
-raddf = ggplot(sigtabf2, aes(x=COG, y=log2FoldChange, color=log2FoldChange)) + geom_point(size=6) + 
-  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) + 
-  ylim(-10, +10) +
-  scale_color_gradient2(limits= c(-10, 10), low="blue", mid= "grey", high="red")
-(raddf)
 
 ###############################
 #Perform Anova in general COG cathegories
@@ -775,7 +755,7 @@ write.csv(otu_table(per.radishgeneral2), file="~/Documents/radish.csv")
 
 #Prepare for anova
 
-tperbean = t(per.bengeneral2data)
+tperbean = t(per.beangeneral2data)
 tperradish = t(per.radishgeneral2data)
   
 tperbean = as.data.frame(tperbean)
@@ -869,7 +849,7 @@ plotbeanradish
 #Load the different tables
 
 B = read.table("Input_tables/rrn_factor_bean.txt", header=TRUE)
-R = read.table("Input_tables/rrn_factor_radish_2.txt", header=TRUE)
+R = read.table("Input_tables/rrn_radish_2.txt", header=TRUE)
 
 #Create Boxplots
 
@@ -889,20 +869,17 @@ grid.arrange(bean_rrn, radish_rrn, nrow=1, ncol=2)
 ggsave("bean_rrn.pdf", plot = bean, width = 11, height = 8)
 ggsave("radish_rrn.pdf", plot = radish, width = 11, height = 8)
 
-#ANOVA
-#load data
-B = read.table("~/Documents/Metagenomics_paper/GT_06_2017/rrn_factor_bean.txt", header=TRUE)
-R = read.table("~/Documents/Metagenomics_paper/GT_06_2017/rrn_factor_radish.txt", header=TRUE)
+
 
 #Anova
 Ba= aov(diversity ~ stage, data = B )
 Ra= aov(diversity ~ stage, data = R )
-Ra2= aov(Diversity ~ Stage, data = R2 )
+
 
 #Summary
 SumBa = summary.aov(Ba)
 SumRa = summary.aov(Ra)
-SumRa2 = summary.aov(Ra2)
+
 
 #####################
 #Classified reads
