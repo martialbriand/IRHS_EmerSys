@@ -1,0 +1,94 @@
+Linux version
+
+Using ReadLine
+
+Running 64Bit Version
+
+mothur v.1.39.5
+Last updated: 3/20/2017
+
+by
+Patrick D. Schloss
+
+Department of Microbiology & Immunology
+University of Michigan
+http://www.mothur.org
+
+When using, please cite:
+Schloss, P.D., et al., Introducing mothur: Open-source, platform-independent, community-supported software for describing and comparing microbial communities. Appl Environ Microbiol, 2009. 75(23):7537-41.
+
+Distributed under the GNU General Public License
+
+Type 'help()' for information on the commands that are available
+
+For questions and analysis support, please visit our forum at https://www.mothur.org/forum
+
+Type 'quit()' to exit program
+Interactive Mode
+
+
+mothur > align.seqs(fasta=asv_seq2.fasta, ttps://www.mothur.org/forum
+[ERROR]: You are missing )
+Invalid.
+
+mothur > 
+[ERROR]: You are missing (
+Invalid.
+
+mothur > Type 'quit()' to exit program
+
+mothur > 
+[ERROR]: You are missing (
+Invalid.
+
+mothur > align.seqs(fasta=asv_seq2.fasta, reference=/home/mbriand/metauto/16S/metauto16S_1.63/silva.v4.fasta)
+
+Using 1 processors.
+
+Reading in the /home/mbriand/metauto/16S/metauto16S_1.63/silva.v4.fasta template sequences...	DONE.
+It took 8 to read  14956 sequences.
+[ERROR]: Could not open /home/mbriand/metauto/16S/metauto16S_1.63/silva.v4.8mer
+Aligning sequences from asv_seq2.fasta ...
+[WARNING]: Some of your sequences generated alignments that eliminated too many bases, a list is provided in asv_seq2.flip.accnos. If you set the flip parameter to true mothur will try aligning the reverse compliment as well.
+It took 16 secs to align 4439 sequences.
+
+
+Output File Names: 
+asv_seq2.align
+asv_seq2.align.report
+asv_seq2.flip.accnos
+
+
+mothur > filter.seqs(asv_seq2.align, vertical=T, trump=.)
+asv_seq2.align is not a valid parameter.
+The valid parameters are: fasta, hard, trump, soft, vertical, processors, seed, inputdir, and outputdir.
+Using asv_seq2.align as input file for the fasta parameter.
+
+Using 1 processors.
+[ERROR]: did not complete filter.seqs.
+
+mothur > clearcut(fasta=asv_seq2.align, DNA=T)
+
+Output File Names: 
+asv_seq2.tre
+
+
+mothur > quit()
+
+
+************************************************************
+************************************************************
+************************************************************
+Detected 5 [ERROR] messages, please review.
+************************************************************
+************************************************************
+************************************************************
+
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<^>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<^>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<^>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+Detected 1 [WARNING] messages, please review.
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<^>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<^>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<^>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
