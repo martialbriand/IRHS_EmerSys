@@ -1,0 +1,432 @@
+---
+title: "Single seed microbiota: assembly and transmission from parent plant to seedling"
+author: "Chesneau et al., 2021"
+date: "21/05/2021"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, autodep = TRUE, warning = FALSE)
+#Set working direction
+knitr::opts_knit$set(root.dir = "~/These2/Script R/F2S-diversite/F2S-year-4/Final_GitHub/Dataset1") 
+```
+
+# Before you start
+
+This script has been made on R 4.0.0 (and Rstudio 1.2.5019)
+```{r R version}
+R.version
+library(ggplot2)
+#Load theme set
+theme_set(theme_bw())
+```
+
+
+# Data information
+**Project:** ANR SEEDS
+
+**Experiment 1:** "Culture-based enrichment of seed-borne bacteria "  
+
+**Factors first dataset :** 
+
+* Plant species : bean (*Phaseolus vulgaris*) and radish (*Raphanus sativus*)
+* Habitats sampled : Seed lots
+* DNA extraction : MN Food directly after seed soaking (DNA) or after enrichment on TSA10% (CFU)
+* 1 sequencing run (MiSeq v2 - 500 cycles )
+
+
+# 1- Sequence analyses
+## 1.1 - Remove primers with cutadapt v1.15
+```
+for i in `cat group`; do cutadapt --discard-untrimmed -o $i.gyrB.R1.fq -p $i.gyrB.R2.fq -g MGNCCNGSNATGTAYATHGG -G ACNCCRTGNARDCCDCCNGA -e 0.1  -O 20 $i*L001_R1_001.fastq.gz $i*_L001_R2_001.fastq.gz; done
+```
+
+## 1.2- Convert fastq to ASV table (dada2)
+To save computing time, the code is not evaluated in the version of the document and the results are not included.  
+
+```{r echo=FALSE, eval = FALSE}
+library(dada2); packageVersion("dada2")
+#Adapt from https://benjjneb.github.io/dada2/tutorial.html
+path <- "~/Documents/Papers/Chesneau_2021/github/dataset1/" 
+list.files(path)
+fnFs <- sort(list.files(path, pattern="gyrB.R1.fq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="gyrB.R2.fq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+plotQualityProfile(fnFs[1:8]) #select 175
+plotQualityProfile(fnRs[1:8]) #select 125 
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(175,125),
+                     maxN=0, maxEE=c(1,1), truncQ=5, rm.phix=TRUE,
+                     compress=TRUE, multithread=TRUE) # 
+head(out)
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE) #without pooling or pseudo-pooling (no need to detect rare ASV)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+dadaFs[[1]]
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+#Since gyrB is a protein-coding genes only triplets should be conserved (244-247-250-253-256-259-262-265-268)
+seqtab244 <- seqtab[,nchar(colnames(seqtab)) %in% 244]
+seqtab247 <- seqtab[,nchar(colnames(seqtab)) %in% 247]
+seqtab250 <- seqtab[,nchar(colnames(seqtab)) %in% 250]
+seqtab253 <- seqtab[,nchar(colnames(seqtab)) %in% 253]
+seqtab256 <- seqtab[,nchar(colnames(seqtab)) %in% 256]
+seqtab259 <- seqtab[,nchar(colnames(seqtab)) %in% 259]
+seqtab262 <- seqtab[,nchar(colnames(seqtab)) %in% 262]
+seqtab265 <- seqtab[,nchar(colnames(seqtab)) %in% 265]
+seqtab268 <- seqtab[,nchar(colnames(seqtab)) %in% 268]
+#Merge all files
+seq.final <- cbind(seqtab244, seqtab247, seqtab250, seqtab253, seqtab256, seqtab259, seqtab262, seqtab265, seqtab268) 
+dim(seq.final)
+sum(seq.final)/sum(seqtab)
+#Detect/Remove chimera
+seqtab.nochim <- removeBimeraDenovo(seq.final, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seq.final)
+#Detect stop codons
+#Summary
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+saveRDS(seqtab.nochim, "~/Documents/Papers/Chesneau_2021/github/dataset1/ASV_gyrB_DNA_CFU.rds")
+# Assign taxonomy (RDP)
+taxa.g <- assignTaxonomy(seqtab.nochim, "~/Documents/Papers/Chesneau_2021/github/DB/train_set_gyrB_v4.fa.gz", multithread=TRUE)
+taxa.print.g <- taxa.g # Removing sequence rownames for display only
+rownames(taxa.print.g) <- NULL
+head(taxa.print.g)
+saveRDS(taxa.g, "~/Documents/Papers/Chesneau_2021/github/dataset1/taxo_gyrB_DNA_CFU.rds")
+```
+
+# 2 - Filtering data
+
+## 2.1 - Construct phyloseq objects
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+#Create phyloseq objects
+#Read files
+asvgyrB <- readRDS("ASV_gyrB_DNA_CFU.rds")
+taxgyrB <- readRDS("taxo_gyrB_DNA_CFU.rds")
+design <- read.csv("design_experiment1.csv", sep = ";", row.names = 1, check.names=FALSE)
+#Create Phyloseq Objects
+library(phyloseq)
+psgyrB <- phyloseq(tax_table(taxgyrB), sample_data(design),
+                   otu_table(asvgyrB, taxa_are_rows = FALSE)) #1947 taxa and 62 samples
+psgyrB
+```
+
+## 2.2 - ASVs filtering
+
+* Filtered ASV based on taxonomy  
+* Rename ASV sequences 
+* Subset Samples (remove sample with less than 1000 counts)  
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+#Remove all ASVs not affiliated at the kingdom level and parE
+psgyrB1 <- subset_taxa(psgyrB, !is.na(Kingdom) & !Kingdom %in% c("parE") & !is.na(Phylum)) # 1517 taxa
+#Rename ASV
+dna.gyrB <- Biostrings::DNAStringSet(taxa_names(psgyrB1))
+names(dna.gyrB) <- taxa_names(psgyrB1)
+psgyrB2 <- merge_phyloseq(psgyrB1, dna.gyrB)
+taxa_names(psgyrB2) <- paste0("ASV", seq(ntaxa(psgyrB2)))
+#Subset Samples (remove sample with less than 1000 counts)
+psgyrB3 <- prune_samples(sample_sums(psgyrB2)>=1000, psgyrB2)# 56 samples
+psgyrB4 <- filter_taxa(psgyrB3, function(x) sum(x) > 0, TRUE) #1421 taxa
+```
+
+## 2.3 - Phylogenetic tree 
+
+Neighbor-Joining tree were constructed the packages DECIPHER v 2.12.0 and Phangorn v 2.5.5 using default paramaters.
+
+```{r, echo=FALSE, warning= FALSE, results='hide', eval = FALSE, message=FALSE}
+library(DECIPHER)
+seqs.gyrB <- refseq(psgyrB4)
+alignment.gyrB <- AlignTranslation(seqs.gyrB, sense = "+", readingFrame = 2, type ="DNAStringSet") 
+library("phangorn") ; packageVersion("phangorn")
+phang.align.gyrB <- phyDat(as(alignment.gyrB, "matrix"), type="DNA")
+dm.gyrB <- dist.ml(phang.align.gyrB)
+treeNJ.gyrB <- NJ(dm.gyrB)# Note, tip order != sequence order 
+dgyrB <- phyloseq(tax_table(psgyrB4), sample_data(psgyrB4),
+                 otu_table(psgyrB4, taxa_are_rows = FALSE), refseq(psgyrB4), phy_tree(treeNJ.gyrB))
+saveRDS(dgyrB, "gyrB_PS_dataset1.rds") # 147 taxa and 56 samples
+```
+
+
+# 3 - Compare community profiles estimated with DNA or CFU
+
+```{r, echo=FALSE, results='hide'}
+library(phyloseq); packageVersion("phyloseq")
+dgyrB <- readRDS("gyrB_PS_dataset1.rds")  
+```
+
+## 3.1 - Assess sequencing depth
+
+```{r, echo=FALSE, results='hide', fig.width=7, fig.height=4, message=FALSE, warning= FALSE}
+library(ggplot2); packageVersion("ggplot2")
+library(data.table); packageVersion("data.table")
+sdtgyrB <- data.table(as(sample_data(dgyrB), "data.frame"),
+                      TotalReads = sample_sums(dgyrB), keep.rownames = TRUE)
+sdtgyrB$logreads <-log(sdtgyrB$TotalReads, 10)
+
+plot.read.gyrB <- ggplot(data=sdtgyrB, aes_string(x='Stage',y='logreads', color = 'Method')) + 
+  geom_point() +
+  scale_color_manual(values=c("#FF4000", "#00BFFF")) +
+  facet_grid (~Method, scales = "free") +
+  ggtitle("Number of reads per sampling stage")
+plot.read.gyrB
+```
+
+```{r, echo=FALSE, message=FALSE}
+plot.read.gyrB
+```
+
+We next performed rarefaction curves
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library("vegan")
+library(ggplot2)
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/richness.R")
+
+sample_data(dgyrB)$Experiment <- c("Expe1") 
+
+rcurvegyrB <- ggrare(dgyrB, 
+                    step = 100, 
+                    color = "Method",
+                    se = FALSE)  + labs (title = "A - gyrB") + geom_vline(xintercept=4000)
+
+rcurvegyrBf <- rcurvegyrB + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Species richness") + xlab ("Sample size") + ggtitle("16S rRNA gene") + facet_grid(~Experiment, scale = "free")
+rcurvegyrBf
+```
+
+```{r, echo=FALSE, message=FALSE}
+rcurvegyrBf
+```
+
+## 3.2 - Select samples that have been characterized with DNA and CFU-based approaches 
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning= FALSE}
+library('dplyr'); packageVersion('dplyr')
+dgyrB_DNA <- subset_samples(dgyrB, Method %in% c("DNA"))
+dgyrB_DNA<-filter_taxa(dgyrB_DNA,function(x)mean(x)>0,TRUE) # 359 taxa and 26 samples
+dgyrB_CFU <- subset_samples(dgyrB, Method %in% c("CFU"))
+dgyrB_CFU<-filter_taxa(dgyrB_CFU,function(x)mean(x)>0,TRUE) # 1112 taxa and 30 samples
+
+df.gyrB <- data.frame(sample_data(dgyrB))
+both <-df.gyrB %>% group_by(Rep) %>% filter(n() > 1)
+keepTaxa.gyrB <- as.character(both$Rep) # Select corresponding ASVs
+dgyrBf <- subset_samples(dgyrB, Rep %in% keepTaxa.gyrB)
+dgyrBf <- filter_taxa(dgyrBf, function(x) sum(x) > 0, TRUE) #dgyrBf : 130 taxa and 48 samples
+```
+* Overall 24 samples have been characterized with DNA and CFU-based approaches.    
+ 
+## 3.3 - UpSet
+
+* Compare presence of specific ASVs in CFU and DNA approach and shared ASVs between approaches.    
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning= FALSE}
+library('UpSetR'); packageVersion('UpSetR')
+#Merge by floral or seeds
+merged <- merge_samples(dgyrBf, "Method")
+#Fix continuous variable to discrete value
+sample_data(merged)$Method <- factor(sample_names(merged))
+#Extract count datasets from phyloseq
+count <- t(otu_table(merged))
+#Transform in binary matrix
+count[count> 0] <- 1
+#Convert to dataframe
+df_gyrB <- as.data.frame(count)
+#Read abundance per ASV
+rel.abu <- data.frame(taxa_sums(dgyrBf))
+rel.abu$log <- log10(rel.abu$taxa_sums.dgyrBf)
+#Merge ASV dataframe and ASV abundance
+df_gyrBf_upset <-merge.data.frame(df_gyrB, rel.abu, by="row.names", all.x=TRUE)
+#Upset
+Upset_gyrBb <- upset(df_gyrBf_upset,
+                     nintersects = 50, 
+                     order.by = "freq", 
+                     sets.x.label="ASV",text.scale=c(1.3,1.3,1.3,1,1.8,2.5),
+                     decreasing ="TRUE",
+                     boxplot.summary = c("log"),
+                     queries = list(list(query = intersects, params = list ("CFU"), color = "#FF4000", active = T),
+                                    list(query = intersects, params = list ("DNA"), color = "#00BFFF", active = T),
+                                    list(query = intersects, params = list ("CFU", "DNA"), color = "#31B404", active = T)))
+Upset_gyrBb
+```
+
+```{r, echo=FALSE, message=FALSE}
+Upset_gyrBb
+```
+
+## 3.4 - Rank abundance curve
+
+ We estimated rank abundance curves of taxa associated with seeds.     
+ 
+```{r, echo=FALSE, results='hide', message=FALSE, warning= FALSE}
+library(stringr)
+library(tidyverse)
+ran.abu <- df_gyrBf_upset %>%
+  unite(Type, c("CFU", "DNA")) %>%
+  mutate(Type = str_replace_all(Type, c("0_1" = "DNA", "1_0" = "CFU", "1_1" = "CFU_&_DNA"))) %>%
+  rename(ASV=Row.names,
+         Abundance=taxa_sums.dgyrBf.)
+#Only display the top 30
+top.ran.abu <- ran.abu[order(-ran.abu$Abundance),][1:30,]
+ggplot(top.ran.abu,aes(x=reorder(ASV,-Abundance),y=log)) +
+  geom_point(aes(color=Type), size=4) + 
+  scale_color_manual(values=c("#FF4000", "#31B404", "#00BFFF")) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x=element_blank()) +
+  labs (y="log10 reads") +
+  scale_y_log10() +
+  ggtitle("Rank abundance curve") 
+```
+
+```{r, echo=FALSE, message=FALSE}
+top.ran.abu
+```
+
+## 3.5 - Overview of taxonomic composition
+```{r, echo=FALSE, results='hide', message=FALSE, fig.show='hide'}
+library(reshape2); packageVersion("reshape2")
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/graphical_methods.R")
+#Subsample per plant species
+dgyrBf.bean <- subset_samples(dgyrBf, Plant %in% c("Bean"))
+dgyrBf.bean <- filter_taxa(dgyrBf.bean, function(x) sum(x) > 0, TRUE) #32 taxa and 24 samples
+dgyrBf.rad <- subset_samples(dgyrBf, Plant %in% c("Radish")) #110 taxa and 24 samples 
+dgyrBf.rad <- filter_taxa(dgyrBf.rad, function(x) sum(x) > 0, TRUE)
+#Plot
+plot.tax.bean <- plot_composition(dgyrBf.bean, "Kingdom", "gyrB", "Order", numberOfTaxa=6, fill="Order") +
+  ggtitle ("Bean") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text.x = element_text(size = 12, color = "white")) + 
+  scale_color_manual(values=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#675D63", "#000000"))  +
+  scale_fill_manual(values=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#675D63", "#000000")) +
+  facet_grid(~Method, scales = "free") 
+plot.tax.rad <- plot_composition(dgyrBf.rad, "Kingdom", "gyrB", "Order", numberOfTaxa=6, fill="Order") +
+  ggtitle ("Radish") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text.x = element_text(size = 12, color = "white")) + 
+  scale_color_manual(values=c("#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#7F770B","#675D63", "#000000"))  +
+  scale_fill_manual(values=c("#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#7F770B", "#675D63", "#000000")) + 
+  facet_grid(~Method, scales = "free") 
+```
+
+```{r, echo=FALSE, message=FALSE, fig.width=12, fig.height=6}
+library(gridExtra)
+plot.taxo <- grid.arrange(
+  plot.tax.bean,
+  plot.tax.rad,
+  ncol=2)
+```
+
+## 3.6 - Beta-diversity analyses
+
+We performed a log(1+x) transformation for limiting the impact of unequal sequencing depth.     
+
+```{r, echo=FALSE, results='hide', message=FALSE, fig.show='hide'}
+library('vegan'); packageVersion('vegan')
+dgyrBf.log <- transform_sample_counts(dgyrBf, function(x) log(1 + x))
+metadata <- as(sample_data(dgyrBf.log), "data.frame") 
+dist.uUF <- phyloseq::distance(dgyrBf.log, method = "uunifrac")
+uUF.gyrB <- adonis2(dist.uUF ~ Method,
+                               data = metadata)
+print(uUF.gyrB)
+dist.wUF <- phyloseq::distance(dgyrBf.log, method = "wunifrac")
+wUF.gyrB <- adonis2(dist.wUF ~ Method,
+                               data = metadata)
+print(wUF.gyrB)
+
+#Plot
+uUF <-ordinate(dgyrBf.log,"PCoA","uunifrac")
+wUF <-ordinate(dgyrBf.log,"PCoA","wunifrac")
+pcoa.uUF <- plot_ordination(dgyrBf.log, uUF, type="samples",color="Method", shape="Plant") +
+  geom_point(size=5) +
+  scale_shape_manual(values=c(1,19)) +
+  scale_color_manual(values=c("#FF4000", "#00BFFF")) +
+  theme(strip.text.x = element_text(size = 11), 
+        strip.text.y = element_text(size = 11),
+        axis.title.x=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_text(size=12), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(size=15)) +
+  annotate(geom="text", x=0.15, y=0.4, label="R² = 0.059 , P =  0.002", color="black", size=4) + 
+  guides(size = FALSE) +
+  ggtitle("unweighted UniFrac distance")
+
+pcoa.wUF <- plot_ordination(dgyrBf.log, wUF, type="samples",color="Method", shape="Plant") +
+  geom_point(size=5) + 
+  scale_shape_manual(values=c(1,19)) +
+  scale_color_manual(values=c("#FF4000", "#00BFFF")) +
+  theme(strip.text.x = element_text(size = 11), 
+        strip.text.y = element_text(size = 11),
+        axis.title.x=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_text(size=12), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(size=15)) +
+  annotate(geom="text", x=0.5, y=0.2, label="R² = 0.062 , P =  0.006",color="black", size=4) +  
+  guides(size = FALSE) +
+  ggtitle("weighted UniFrac distance")
+```
+
+```{r, echo=FALSE, message=FALSE, fig.width=12, fig.height=6}
+library(gridExtra)
+plot.taxo <- grid.arrange(
+  pcoa.uUF,
+  pcoa.wUF,
+  ncol=2)
+```
+
+## 3.7 - Phylogenetic tree
+
+Display phylogentic tree
+```{r, echo=FALSE, results='hide'}
+plot_tree(merged, nodelabf=nodeplotblank, 
+          label.tips="Genus", 
+          text.size = 3,
+          ladderize="TRUE", 
+          sizebase=5,
+          color="Class",
+          shape="Method",
+          base.spacing=0.02) +  
+  scale_shape_manual(values=c(1,19)) +
+  ggtitle("ML tree")
+```
+
+Export newick formatted tree for iTol
+```{r, echo=FALSE, results='hide'}
+library(ape); packageVersion('ape')
+write.tree(phy = phy_tree(dgyrBf), file = "CFU_Vs_DNA_final_dec.tre")
+write.csv(tax_table(merged),"Tax_table_DNA_CFU.csv")
+write.csv(t(otu_table(merged)),"ASV_table_DNA_CFU.csv")
+```
+
+*****
+
+# End of script
+
+Chesneau et al., 2021     
+title: "Single seed microbiota: assembly and transmission from parent plant to seedling"      
+

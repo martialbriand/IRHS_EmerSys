@@ -1,0 +1,1825 @@
+---
+title: "Single seed microbiota: assembly and transmission from parent plant to seedling"
+author: "Chesneau et al., 2021"
+date: "21/05/2021"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE, autodep = TRUE, warning = FALSE)
+#Set working direction
+knitr::opts_knit$set(root.dir = "~/These2/Script R/F2S-diversite/F2S-year-4/Final_GitHub/Dataset3")
+```
+
+# Before you start
+
+This script has been made on R version 4.0.0  (and Rstudio 1.2.5019)
+```{r R version}
+R.version
+#Load theme set
+library(ggplot2)
+theme_set(theme_bw())
+```
+
+# Data information
+**Project:** ANR SEEDS
+
+**Experiment 3 :** "Community dynamics during emergence"
+
+**Factors :** 
+
+* Plant species : bean (*Phaseolus vulgaris*) and radish (*Raphanus sativus*)       
+* Habitats sampled : Seeds and seedlings     
+* Seeds were collected from 5 plants, 8 fruits per plants, 4 seeds per fruit     
+* DNA extraction : MN Food on CFU - after enrichment on TSA10%     
+* Primers : v4 region of 16S rRNA gene (Caporaso et al., 2011) and *gyrB* (Barret et al., 2015)         
+* 2 sequencing run (MiSeq v2 - 500 cycles )       
+
+## 1 - Load dataset
+
+### 1.1 - Full dataset
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(phyloseq); packageVersion("phyloseq")
+d16S <- readRDS("16S_PS_dataset2_3.rds") #2738 taxa and 1424 samples
+dgyrB <- readRDS("gyrB_PS_dataset2_3.rds") #4815 taxa and 1398 samples
+```
+
+Select only the third dataset
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Select third dataset
+design.16S.exp3 <- read.csv("design_dataset3_16S.csv", row.names=1, header=TRUE, dec=".", sep=";")
+design.gyrB.exp3 <- read.csv("design_dataset3_gyrB.csv", row.names=1, header=TRUE, dec=".", sep=";")
+d16S.exp3 <- phyloseq(sample_data(design.16S.exp3),
+                  tax_table(d16S),
+                  refseq(d16S),
+                  phy_tree(d16S),
+                   otu_table(d16S, taxa_are_rows = TRUE)) 
+d16S.exp3 <- filter_taxa(d16S.exp3,function(x) sum (x)>0, TRUE) #671 taxa and 342 samples
+dgyrB.exp3 <- phyloseq(sample_data(design.gyrB.exp3),
+                  tax_table(dgyrB),
+                  refseq(dgyrB),
+                  phy_tree(dgyrB),
+                   otu_table(dgyrB, taxa_are_rows = TRUE)) 
+dgyrB.exp3 <- filter_taxa(dgyrB.exp3,function(x) sum (x)>0, TRUE) #1089 taxa and 335 samples
+```
+
+### 1.2 - Subset by plant species
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+d16S.exp3.b <- subset_samples(d16S.exp3, Plant.species %in% c("Bean"))
+d16S.exp3.b <- filter_taxa(d16S.exp3.b, function(x) sum(x) > 0, TRUE) # 374 taxa and 165 samples
+d16S.exp3.r <- subset_samples(d16S.exp3, Plant.species %in% c("Radish"))
+d16S.exp3.r <- filter_taxa(d16S.exp3.r, function(x) sum(x) > 0, TRUE) # 369 taxa and 177 samples
+dgyrB.exp3.b <- subset_samples(dgyrB.exp3, Plant.species %in% c("Bean"))
+dgyrB.exp3.b <- filter_taxa(dgyrB.exp3.b, function(x) sum(x) > 0, TRUE) # 701 taxa and 166 samples
+dgyrB.exp3.r <- subset_samples(dgyrB.exp3, Plant.species %in% c("Radish"))
+dgyrB.exp3.r <- filter_taxa(dgyrB.exp3.r, function(x) sum(x) > 0, TRUE) # 504 taxa and 169 samples
+```
+
+Bean and radish       
+
+## 2 - Seed 2 seedling at the individual level
+
+Here we assessed the dynamics of the seed microbiota during emergence for each seed-seedling       
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+d16S.exp3.b.dy <- subset_samples(d16S.exp3.b, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+d16S.exp3.b.dy <- filter_taxa(d16S.exp3.b.dy, function(x) sum(x) > 0, TRUE) #223 taxa and 86 samples
+d16S.exp3.r.dy <- subset_samples(d16S.exp3.r, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+d16S.exp3.r.dy <- filter_taxa(d16S.exp3.r.dy, function(x) sum(x) > 0, TRUE) # 243 taxa and 114 samples
+dgyrB.exp3.b.dy <- subset_samples(dgyrB.exp3.b, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+dgyrB.exp3.b.dy <- filter_taxa(dgyrB.exp3.b.dy, function(x) sum(x) > 0, TRUE) # 428 taxa and 88 samples
+dgyrB.exp3.r.dy <- subset_samples(dgyrB.exp3.r, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+dgyrB.exp3.r.dy <- filter_taxa(dgyrB.exp3.r.dy, function(x) sum(x) > 0, TRUE) # 330 taxa and 100 samples
+```
+
+ We first assess the number of sequences per sample
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(data.table)
+sdt16S <- data.table(as(sample_data(d16S.exp3), "data.frame"),
+                     TotalReads = sample_sums(d16S.exp3), keep.rownames = TRUE)
+sdtgyrB <- data.table(as(sample_data(dgyrB.exp3), "data.frame"),
+                     TotalReads = sample_sums(dgyrB.exp3), keep.rownames = TRUE)
+```
+
+We next performed rarefaction curves
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library("vegan")
+library(ggplot2)
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/richness.R")
+
+sample_data(d16S.exp3)$Experiment <- c("Exp3")
+sample_data(dgyrB.exp3)$Experiment <- c("Exp3")
+
+rcurve16S <- ggrare(d16S.exp3, 
+                    step = 100, 
+                    color = "Habitat",
+                    se = FALSE)  + labs (title = "16S rRNA gene") + geom_vline(xintercept=4000)
+
+rcurve16Sf <- rcurve16S + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Species richness") + xlab ("Sample size") + ggtitle("16S rRNA gene") + facet_grid(~Experiment, scale = "free")
+rcurve16Sf
+
+
+rcurvegyrB <- ggrare(dgyrB.exp3, 
+                    step = 100, 
+                    color = "Habitat",
+                    se = FALSE)  + labs (title = "gyrB") + geom_vline(xintercept=4000)
+
+rcurvegyrBf <- rcurvegyrB + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Species richness") + xlab ("Sample size") + ggtitle("gyrB") + facet_grid(~Experiment, scale = "free")
+rcurvegyrBf
+```
+
+```{r, echo=FALSE, message=FALSE}
+rcurve16Sf
+rcurvegyrBf
+```
+
+### 2.1 - Richness
+
+In this part we used rarefy data :  
+
+* **16S** : 4,000 reads per sample    
+* **gyrB** : 4,000 reads per sample  
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+r16S.b.dy <- rarefy_even_depth(d16S.exp3.b.dy, sample.size = 4000, rngseed = 700) 
+r16S.r.dy <- rarefy_even_depth(d16S.exp3.r.dy, sample.size = 4000, rngseed = 700)
+rgyrB.b.dy <- rarefy_even_depth(dgyrB.exp3.b.dy, sample.size = 4000, rngseed = 800)
+rgyrB.r.dy <- rarefy_even_depth(dgyrB.exp3.r.dy, sample.size = 4000, rngseed = 800)
+#Table of alpha-diversity estimators
+table_r16S.b.dy <- estimate_richness(r16S.b.dy, split = TRUE, measures=c("Observed"))
+table_r16S.r.dy <- estimate_richness(r16S.r.dy, split = TRUE, measures=c("Observed"))
+table_rgyrB.b.dy <- estimate_richness(rgyrB.b.dy, split = TRUE, measures=c("Observed"))
+table_rgyrB.r.dy <- estimate_richness(rgyrB.r.dy, split = TRUE, measures=c("Observed"))
+#Remove samples lost with rarefaction
+sample_data(d16S.exp3.b.dy) <- sample_data(d16S.exp3.b.dy)[rownames(sample_data(d16S.exp3.b.dy)) %in% row.names(table_r16S.b.dy), ] 
+sample_data(d16S.exp3.r.dy) <- sample_data(d16S.exp3.r.dy)[rownames(sample_data(d16S.exp3.r.dy)) %in% row.names(table_r16S.r.dy), ] 
+sample_data(dgyrB.exp3.b.dy) <- sample_data(dgyrB.exp3.b.dy)[rownames(sample_data(dgyrB.exp3.b.dy)) %in% row.names(table_rgyrB.b.dy), ] 
+sample_data(dgyrB.exp3.r.dy) <- sample_data(dgyrB.exp3.r.dy)[rownames(sample_data(dgyrB.exp3.r.dy)) %in% row.names(table_rgyrB.r.dy), ] 
+#Bind design + table of alpha_div
+datar16S.b.dy <- cbind(sample_data(d16S.exp3.b.dy), table_r16S.b.dy) 
+datar16S.r.dy <- cbind(sample_data(d16S.exp3.r.dy), table_r16S.r.dy) 
+datargyrB.b.dy <- cbind(sample_data(dgyrB.exp3.b.dy), table_rgyrB.b.dy) 
+datargyrB.r.dy <- cbind(sample_data(dgyrB.exp3.r.dy), table_rgyrB.r.dy) 
+```
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Stats
+
+stats_b_16S <- wilcox.test(Observed ~ Habitat, datar16S.b.dy) # p-value = 4.2e-09
+stats_b_16S <- data.frame(p.value = c("p-value = 4.2e-09", ""),
+                          Habitat = c("Seed", "Seedling"))
+stats_r_16S <- wilcox.test(Observed ~ Habitat, datar16S.r.dy) # p-value = 0.5898
+stats_r_16S <- data.frame(p.value = c("p-value = ns", ""),
+                          Habitat = c("Seed", "Seedling"))
+stats_b_gyrB <- wilcox.test(Observed ~ Habitat, datargyrB.b.dy) # p-value = 0.0002125
+stats_b_gyrB <- data.frame(p.value = c("p-value = 2.1e-05", ""),
+                          Habitat = c("Seed", "Seedling"))
+stats_r_gyrB <- wilcox.test(Observed ~ Habitat, datargyrB.r.dy) # p-value = 0.1377
+stats_r_gyrB <- data.frame(p.value = c("p-value = ns", ""),
+                          Habitat = c("Seed", "Seedling"))
+```
+
+
+
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(ggpubr)
+#Plot Richness
+p.r16S.b.dy <- ggplot(data=datar16S.b.dy, aes_string(x='Habitat',y='Observed', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Bean - 16S") + 
+     theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +
+    stat_compare_means() + 
+  facet_grid(~Habitat, scale = "free") + 
+    geom_text( data   = stats_b_16S, mapping = aes(x = Habitat, y = 25, label = p.value), size = 4)
+
+p.r16S.r.dy <- ggplot(data=datar16S.r.dy, aes_string(x='Habitat',y='Observed', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Radish - 16S") + 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means() + 
+  facet_grid(~Habitat, scale = "free") + 
+    geom_text( data   = stats_r_16S, mapping = aes(x = Habitat, y = 28, label = p.value), size = 4)
+
+p.rgyrB.b.dy <- ggplot(data=datargyrB.b.dy, aes_string(x='Habitat',y='Observed', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Bean - gyrB") + 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +  
+  stat_compare_means() + 
+  facet_grid(~Habitat, scale = "free") + 
+    geom_text( data   = stats_b_gyrB, mapping = aes(x = Habitat, y = 25, label = p.value), size = 4)
+
+p.rgyrB.r.dy <- ggplot(data=datargyrB.r.dy, aes_string(x='Habitat',y='Observed', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Radish - gyrB") + 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means() + 
+  facet_grid(~Habitat, scale = "free")+ 
+    geom_text( data   = stats_r_gyrB, mapping = aes(x = Habitat, y = 33, label = p.value), size = 4)
+```
+
+```{r, echo=FALSE, message=FALSE}
+library(gridExtra)
+plots_observed <- grid.arrange(
+p.r16S.b.dy,
+p.r16S.r.dy,
+p.rgyrB.b.dy,
+p.rgyrB.r.dy,
+  ncol=2,
+  nrow=2)
+```
+
+### 2.2 - Phylogenetic diversity
+
+```{r, echo=FALSE, message=FALSE}
+library(picante)
+PD.16S.bean <- as.data.frame.matrix(otu_table(r16S.b.dy))
+Faith.16S.bean <- pd(samp = PD.16S.bean, tree = phy_tree(r16S.b.dy), include.root = F) 
+d.faith.16S.bean <- merge(sample_data(r16S.b.dy), Faith.16S.bean, by="row.names", all=TRUE) 
+PD.16S.b <- ggplot(data=d.faith.16S.bean,
+                              aes_string(x='Habitat',y='PD', fill='Habitat')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = Habitat)) +
+     ggtitle("A- Bean - 16S") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) + 
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +  
+  stat_compare_means()
+
+PD.16S.rad <- as.data.frame.matrix(otu_table(r16S.r.dy))
+Faith.16S.rad <- pd(samp = PD.16S.rad, tree = phy_tree(r16S.r.dy), include.root = F) 
+d.faith.16S.rad <- merge(sample_data(r16S.r.dy), Faith.16S.rad, by="row.names", all=TRUE) 
+PD.16S.r <- ggplot(data=d.faith.16S.rad,
+                              aes_string(x='Habitat',y='PD', fill='Habitat')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = Habitat)) +
+     ggtitle("B- Radish - 16S") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) + 
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means()
+
+PD.gyrB.bean <- as.data.frame.matrix(otu_table(rgyrB.b.dy))
+Faith.gyrB.bean <- pd(samp = PD.gyrB.bean, tree = phy_tree(rgyrB.b.dy), include.root = F) 
+d.faith.gyrB.bean <- merge(sample_data(rgyrB.b.dy), Faith.gyrB.bean, by="row.names", all=TRUE) 
+PD.gyrB.b <- ggplot(data=d.faith.gyrB.bean,
+                              aes_string(x='Habitat',y='PD', fill='Habitat')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = Habitat)) +
+     ggtitle("A- Bean - gyrB") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) + 
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +  
+  stat_compare_means()
+
+PD.gyrB.rad <- as.data.frame.matrix(otu_table(rgyrB.r.dy))
+Faith.gyrB.rad <- pd(samp = PD.gyrB.rad, tree = phy_tree(rgyrB.r.dy), include.root = F) 
+d.faith.gyrB.rad <- merge(sample_data(rgyrB.r.dy), Faith.gyrB.rad, by="row.names", all=TRUE) 
+PD.gyrB.r <- ggplot(data=d.faith.gyrB.rad,
+                              aes_string(x='Habitat',y='PD', fill='Habitat')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = Habitat)) +
+     ggtitle("B- Radish - gyrB") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) + 
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means()
+```
+
+```{r, echo=FALSE, message=FALSE}
+library(gridExtra)
+plots_observed <- grid.arrange(
+PD.16S.b,
+PD.16S.r,
+PD.gyrB.b,
+PD.gyrB.r,
+  ncol=2,
+  nrow=2)
+```
+
+### 2.3 - Population size
+
+We evaluated the population size for each individual seeds and seedling. And for our axenic system used to grow seedling.
+
+```{r, echo=FALSE, message=FALSE}
+data.cfu <- read.csv("microbiology_dataset3.csv", header=TRUE, row.names=1, dec=".")
+data.cfu.system <-  read.csv("microbiology_dataset3_system.csv", header=TRUE, dec=",", sep = ";")
+
+data.cfu.dy <- subset(data.cfu,   Seed %in% c("Detect") & Germinated %in% c("Yes"))
+data.cfu.dy.m <- rbind (data.cfu.dy, data.cfu.system)
+data.cfu.dy.b <- subset(data.cfu.dy.m,  Plant.species %in% c("Bean"))
+data.cfu.dy.r <- subset(data.cfu.dy.m,  Plant.species %in% c("Radish"))
+data.cfu.dy.s <- subset(data.cfu.dy.m,  Plant.species %in% c("System"))
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Stats
+stats_b.pop <- wilcox.test(LogCFU_sample ~ Habitat, data.cfu.dy.b) # p-value = 4.09e-13
+stats_b.pop <- data.frame(p.value = c("p-value = 4.09e-13", ""),
+                          Habitat = c("Seed", "Seedling"))
+
+stats_r.pop <- wilcox.test(LogCFU_sample ~ Habitat, data.cfu.dy.r) # p-value = 6.348e-08
+stats_r.pop <- data.frame(p.value = c("p-value = 6.348e-08", ""),
+                          Habitat = c("Seed", "Seedling"))
+```
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Plot
+
+p.logCFU.dy.s <- ggplot(data=data.cfu.dy.s, aes_string(x='Habitat',y='LogCFU_sample', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("System") + 
+   theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(face = "bold"))+  
+  scale_fill_manual(values=c("#7e7e7e","#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#7e7e7e","#31B404", "#21610B")) + 
+    facet_grid(~Habitat, scale = "free") +
+  ylab ("Log CFU per seed") +
+  ylim(0,8) 
+  
+  
+p.logCFU.dy.b <- ggplot(data=data.cfu.dy.b, aes_string(x='Habitat',y='LogCFU_sample', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Bean") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(face = "bold"))+  
+  scale_fill_manual(values=c("#31B404", "#21610B", "#7e7e7e")) + 
+  scale_color_manual(values=c("#31B404", "#21610B", "#7e7e7e")) + 
+    facet_grid(~Habitat, scale = "free") + 
+    ylab ("Log CFU per seed") +
+  ylim(0,8) + 
+    geom_text( data   = stats_b.pop, mapping = aes(x = Habitat, y = 8, label = p.value), size = 4)
+  
+p.logCFU.dy.r <- ggplot(data=data.cfu.dy.r, aes_string(x='Habitat',y='LogCFU_sample', fill='Habitat')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Radish") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(face = "bold"))+  
+  scale_fill_manual(values=c("#DF3A01", "#8A0808", "#7e7e7e")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808", "#7e7e7e")) +  
+  facet_grid(~Habitat, scale = "free") + 
+    ylab ("Log CFU per seed") +
+  ylim(0,8)+ 
+    geom_text( data   = stats_r.pop, mapping = aes(x = Habitat, y = 8, label = p.value), size = 4)
+```
+
+```{r, echo=FALSE, message=FALSE}
+theme_set(theme_bw())
+p.logCFU.dy.s
+p.logCFU.dy.b
+p.logCFU.dy.r
+```
+
+### 2.4 - Taxonomy
+
+Here we merged our samples per habitats to evaluate the taxonomic composition.
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+d16S.exp3.b.dy.mer <- merge_samples(d16S.exp3.b.dy, "Habitat")
+sample_data(d16S.exp3.b.dy.mer)$Habitat <- c("Seed", "Seedling")
+d16S.exp3.r.dy.mer <- merge_samples(d16S.exp3.r.dy, "Habitat")
+sample_data(d16S.exp3.r.dy.mer)$Habitat <- c("Seed", "Seedling")
+dgyrB.exp3.b.dy.mer <- merge_samples(dgyrB.exp3.b.dy, "Habitat")
+sample_data(dgyrB.exp3.b.dy.mer)$Habitat <- c("Seed", "Seedling")
+dgyrB.exp3.r.dy.mer <- merge_samples(dgyrB.exp3.r.dy, "Habitat")
+sample_data(dgyrB.exp3.r.dy.mer)$Habitat <- c("Seed", "Seedling")
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(ggplot2); packageVersion("ggplot2")
+library(reshape2); packageVersion("reshape2")
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/graphical_methods.R")
+#Palette taxo
+name_taxo_gyrB <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Burkholderiales", "Enterobacterales", "NA", "Pseudomonadales", "Xanthomonadales", "Unknown", "Other")
+name_taxo_16S <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Betaproteobacteriales", "Enterobacteriales", "NA", "Pseudomonadales", "Xanthomonadales", "Flavobacteriales", "Unknown", "Other")
+#Desired color palette
+OrderPalette_gyrB <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0","#000000", "#8F8E8E")
+OrderPalette_16S <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0", "#FE9A5C" , "#000000", "#8F8E8E")
+#Associated name and color
+names(OrderPalette_gyrB) <- name_taxo_gyrB
+names(OrderPalette_16S) <- name_taxo_16S
+
+#Plot
+tax16S.b.dy <- plot_composition(d16S.exp3.b.dy.mer, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Habitat, scales="free_x", nrow=1) +
+theme( legend.position = "bottom",
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+  axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  ylab ("Relative abundance (%)") + 
+  ggtitle("Bean - 16S") +
+  xlab("Habitat") + 
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S) + 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+tax16S.r.dy <- plot_composition(d16S.exp3.r.dy.mer, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Habitat, scales="free_x", nrow=1) +
+theme( legend.position = "bottom",
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+  axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance (%)") + 
+  ggtitle("Radish - 16S") +
+    xlab("Habitat") + 
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+taxgyrB.b.dy <- plot_composition(dgyrB.exp3.b.dy.mer, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Habitat, scales="free_x", nrow=1) +
+theme( legend.position = "bottom",
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+  axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+ 
+    ylab ("Relative abundance (%)") + 
+  ggtitle("Bean - gyrB") +
+    xlab("Habitat") + 
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+taxgyrB.r.dy <- plot_composition(dgyrB.exp3.r.dy.mer, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Habitat, scales="free_x", nrow=1) +
+theme( legend.position = "bottom", 
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+   axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance (%)") + 
+  ggtitle("Radish - gyrB") +
+    xlab("Habitat") + 
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+
+```{r, echo=FALSE, message=FALSE}
+theme_set(theme_bw())
+library(gridExtra)
+tax_observed <- grid.arrange(tax16S.b.dy,
+tax16S.r.dy,
+taxgyrB.b.dy,
+taxgyrB.r.dy,
+ncol=2,
+nrow=2)
+```
+
+### 2.5 - UpSet
+
+We estimated how many taxa were specifically affiliated to the seed, seedling or both.
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Log10 Read abundance per ASV
+TotalAbundance_16S_bean <- data.frame(log10(taxa_sums(d16S.exp3.b.dy)))
+colnames(TotalAbundance_16S_bean) <- c("log10.abundance") 
+TotalAbundance_16S_rad <- data.frame(log10(taxa_sums(d16S.exp3.r.dy)))
+colnames(TotalAbundance_16S_rad) <- c("log10.abundance") 
+TotalAbundance_gyrB_bean <- data.frame(log10(taxa_sums(dgyrB.exp3.b.dy)))
+colnames(TotalAbundance_gyrB_bean) <- c("log10.abundance") 
+TotalAbundance_gyrB_rad <- data.frame(log10(taxa_sums(dgyrB.exp3.r.dy)))
+colnames(TotalAbundance_gyrB_rad) <- c("log10.abundance") 
+#Merge by habitat
+merged_upset_bean_16S <- merge_samples(d16S.exp3.b.dy, "Habitat")
+merged_upset_rad_16S <- merge_samples(d16S.exp3.r.dy, "Habitat")
+merged_upset_bean_gyrB <- merge_samples(dgyrB.exp3.b.dy, "Habitat")
+merged_upset_rad_gyrB <- merge_samples(dgyrB.exp3.r.dy, "Habitat")
+#Extract count datasets from phyloseq
+count_upset_bean_16S <- t(otu_table(merged_upset_bean_16S))
+count_upset_rad_16S <- t(otu_table(merged_upset_rad_16S))
+count_upset_bean_gyrB <- t(otu_table(merged_upset_bean_gyrB))
+count_upset_rad_gyrB <- t(otu_table(merged_upset_rad_gyrB))
+#Transform in binary matrix
+count_upset_bean_16S[count_upset_bean_16S> 0] <- 1
+count_upset_rad_16S[count_upset_rad_16S> 0] <- 1
+count_upset_bean_gyrB[count_upset_bean_gyrB> 0] <- 1
+count_upset_rad_gyrB[count_upset_rad_gyrB> 0] <- 1
+#Convert to dataframe
+df_upset_bean_16S <- as.data.frame(count_upset_bean_16S)
+df_upset_rad_16S <- as.data.frame(count_upset_rad_16S)
+df_upset_bean_gyrB <- as.data.frame(count_upset_bean_gyrB)
+df_upset_rad_gyrB <- as.data.frame(count_upset_rad_gyrB)
+#Merge dataframe and ASV abundance
+df_upset_bean_16S <-merge.data.frame(df_upset_bean_16S, TotalAbundance_16S_bean, by="row.names",all.x=TRUE)
+df_upset_rad_16S <-merge.data.frame(df_upset_rad_16S, TotalAbundance_16S_rad, by="row.names",all.x=TRUE)
+df_upset_bean_gyrB <-merge.data.frame(df_upset_bean_gyrB, TotalAbundance_gyrB_bean, by="row.names",all.x=TRUE)
+df_upset_rad_gyrB <-merge.data.frame(df_upset_rad_gyrB, TotalAbundance_gyrB_rad, by="row.names",all.x=TRUE)
+#Run UpSet
+library(UpSetR)
+Upset_bean_16S <- upset(df_upset_bean_16S,
+                     nintersects = 50, 
+                     order.by = "freq",
+                     sets.x.label="Number of ASVs",text.scale=c(1.3,1.3,1.3,1,1.8,2.5),
+                     decreasing ="TRUE",
+                     mainbar.y.label = "Number of ASVs",
+                     boxplot.summary = c("log10.abundance"),
+                     queries = list(list(query = intersects, params = list ("Seed"), color = "#31B404", active = T), list(query = intersects, params = list ("Seedling"), color = "#21610B", active = T)))
+Upset_rad_16S <- upset(df_upset_rad_16S,
+                     nintersects = 50, 
+                     order.by = "freq",
+                     sets.x.label="Number of ASVs",text.scale=c(1.3,1.3,1.3,1,1.8,2.5),
+                     decreasing ="TRUE",
+                     mainbar.y.label = "Number of ASVs",
+                     boxplot.summary = c("log10.abundance"),
+                     queries = list(list(query = intersects, params = list ("Seed"), color = "#DF3A01", active = T), list(query = intersects, params = list ("Seedling"), color = "#8A0808", active = T)))
+
+Upset_bean_gyrB <- upset(df_upset_bean_gyrB,
+                     nintersects = 50, 
+                     order.by = "freq",
+                     sets.x.label="Number of ASVs",text.scale=c(1.3,1.3,1.3,1,1.8,2.5),
+                     decreasing ="TRUE",
+                     mainbar.y.label = "Number of ASVs",
+                     boxplot.summary = c("log10.abundance"),
+                     queries = list(list(query = intersects, params = list ("Seed"), color = "#31B404", active = T), list(query = intersects, params = list ("Seedling"), color = "#21610B", active = T)))
+Upset_rad_gyrB <- upset(df_upset_rad_gyrB,
+                     nintersects = 50, 
+                     order.by = "freq",
+                     sets.x.label="Number of ASVs",text.scale=c(1.3,1.3,1.3,1,1.8,2.5),
+                     decreasing ="TRUE",
+                     mainbar.y.label = "Number of ASVs",
+                     boxplot.summary = c("log10.abundance"),
+                     queries = list(list(query = intersects, params = list ("Seed"), color = "#DF3A01", active = T), list(query = intersects, params = list ("Seedling"), color = "#8A0808", active = T)))
+```
+
+```{r, echo=FALSE, message=FALSE}
+Upset_bean_16S
+Upset_rad_16S
+Upset_bean_gyrB
+Upset_rad_gyrB
+```
+
+
+### 2.6 - Rank abundance 
+
+#### 2.6.1 - Measure rank abundance
+
+We assessed rank abundance of seeds and seedlings.     
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#select dataset
+d16S.exp3.dy <- subset_samples(d16S.exp3, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+d16S.exp3.dy <- filter_taxa(d16S.exp3.dy, function(x) sum(x) > 0, TRUE) #141 taxa and 200 samples
+dgyrB.exp3.dy <- subset_samples(dgyrB.exp3, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+dgyrB.exp3.dy <- filter_taxa(dgyrB.exp3.dy, function(x) sum(x) > 0, TRUE) #281 taxa and 188 samples
+library(BiodiversityR)
+#Transform into relative abundance
+d16S.dy.rank <- transform_sample_counts(d16S.exp3.dy, function(x) x / sum(x) ) 
+dgyrB.dy.rank <- transform_sample_counts(dgyrB.exp3.dy, function(x) x / sum(x) ) 
+#Extract OTU table
+d16S.dy.otu <- data.frame(otu_table(d16S.dy.rank))
+dgyrB.dy.otu <- data.frame(otu_table(dgyrB.dy.rank))
+#Extract design
+design.dy.16S <- data.frame(sample_data(d16S.dy.rank))
+design.dy.16S <- cbind(Sample = rownames(design.dy.16S), design.dy.16S)
+row.names(design.dy.16S) <- NULL 
+design.dy.16S$Sample <- as.factor(design.dy.16S$Sample)
+design.dy.gyrB <- data.frame(sample_data(dgyrB.dy.rank))
+design.dy.gyrB <- cbind(Sample = rownames(design.dy.gyrB), design.dy.gyrB)
+row.names(design.dy.gyrB) <- NULL 
+design.dy.gyrB$Sample <- as.factor(design.dy.gyrB$Sample)
+
+#Rank abundance
+rank.dy.16S <- with(design.dy.16S, sapply(levels(Sample), function(lev)
+  rankabundance(d16S.dy.otu, design.dy.16S, 'Sample', lev),USE.NAMES = TRUE))
+rank.dy.gyrB <- with(design.dy.gyrB, sapply(levels(Sample), function(lev)
+  rankabundance(dgyrB.dy.otu, design.dy.gyrB, 'Sample', lev),USE.NAMES = TRUE))
+#Create data frame
+library(data.table)
+df.rank.dy.16S <- do.call("rbind", rank.dy.16S)
+df.rank.dy.16S <- data.frame(rn = row.names(df.rank.dy.16S), df.rank.dy.16S)
+sample.dy.16S <- do.call(rbind.data.frame, rank.dy.16S)
+setDT(sample.dy.16S, keep.rownames = TRUE)[]
+df.rank.dy.gyrB <- do.call("rbind", rank.dy.gyrB)
+df.rank.dy.gyrB <- data.frame(rn = row.names(df.rank.dy.gyrB), df.rank.dy.gyrB)
+sample.dy.gyrB <- do.call(rbind.data.frame, rank.dy.gyrB)
+setDT(sample.dy.gyrB, keep.rownames = TRUE)[]
+#separate first colunm
+library(tidyverse)
+sample.dy.16S.f <- sample.dy.16S %>%separate(rn, c("Sample", "ASV"), ".A")
+df.rank.dy.16S$Sample <- sample.dy.16S.f$Sample
+sample.dy.gyrB.f <- sample.dy.gyrB %>%separate(rn, c("Sample", "ASV"), ".A")
+df.rank.dy.gyrB$Sample <- sample.dy.gyrB.f$Sample
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#add design
+df.rank.dy.16S.f <- merge(df.rank.dy.16S, design.dy.16S, by = "Sample")
+df.rank.dy.gyrB.f <- merge(df.rank.dy.gyrB, design.dy.gyrB, by = "Sample")
+
+#Subset by plant species
+df.rank.dy.16S.bean <- subset(df.rank.dy.16S.f, Plant.species =="Bean")
+df.rank.dy.16S.rad <- subset(df.rank.dy.16S.f, Plant.species =="Radish")
+df.rank.dy.gyrB.bean <- subset(df.rank.dy.gyrB.f, Plant.species =="Bean")
+df.rank.dy.gyrB.rad <- subset(df.rank.dy.gyrB.f, Plant.species =="Radish")
+
+df.rank.dy.16S.bean$rank <- as.factor(df.rank.dy.16S.bean$rank)
+plot.rank.16S.bean <-ggplot(df.rank.dy.16S.bean, aes(x=rank, y=abundance, fill=Habitat)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="YlGn") +
+  geom_jitter(alpha = 0.05) +
+  facet_grid (~Habitat, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+ theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + ggtitle("Bean - 16S") + 
+  ylab("Relative abundance (%)") + xlab("Rank abundance")
+
+df.rank.dy.16S.rad$rank <- as.factor(df.rank.dy.16S.rad$rank)
+plot.rank.16S.rad <-ggplot(df.rank.dy.16S.rad, aes(x=rank, y=abundance, fill=Habitat)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="OrRd") +
+  geom_jitter(alpha = 0.05) +
+  facet_grid (~Habitat, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + ggtitle("Radish - 16S") + 
+  ylab("Relative abundance (%)") + xlab("Rank abundance")
+
+df.rank.dy.gyrB.bean$rank <- as.factor(df.rank.dy.gyrB.bean$rank)
+plot.rank.gyrB.bean <-ggplot(df.rank.dy.gyrB.bean, aes(x=rank, y=abundance, fill=Habitat)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="YlGn") +
+  geom_jitter(alpha = 0.05) +
+  facet_grid (~Habitat, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + ggtitle ("Bean - gyrB") + 
+  ylab("Relative abundance (%)") + xlab("Rank abundance")
+
+df.rank.dy.gyrB.rad$rank <- as.factor(df.rank.dy.gyrB.rad$rank)
+plot.rank.gyrB.rad <-ggplot(df.rank.dy.gyrB.rad, aes(x=rank, y=abundance, fill=Habitat)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="OrRd") +
+  geom_jitter(alpha = 0.05) +
+  facet_grid (~Habitat, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + ggtitle ("Radish - gyrB") + 
+  ylab("Relative abundance (%)") + xlab("Rank abundance")
+```
+
+```{r, echo=FALSE, message=FALSE}
+theme_set(theme_bw())
+library(gridExtra)
+rank <- grid.arrange(plot.rank.16S.bean,
+plot.rank.16S.rad,
+plot.rank.gyrB.bean,
+plot.rank.gyrB.rad,
+ncol=2,
+nrow=2)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Keep only first rank
+df.rank1.dy.16S <- df.rank.dy.16S.f %>%
+  filter(rank==1) %>%
+  rename(ASV = rn) %>% 
+  select(ASV, Sample, proportion, Habitat, ID) 
+df.rank1.dy.gyrB <- df.rank.dy.gyrB.f %>%
+  filter(rank==1) %>%
+  rename(ASV = rn) %>% 
+  select(ASV, Sample, proportion, Habitat, ID)
+```
+
+#### 2.6.2 - Correlation abundance seed vs seedling
+
+We estimated abundance of each taxa in an individual plant in seed and the corresponding future seedling.    
+
+```{r, echo=FALSE, message=FALSE}
+
+#Palette taxo
+name_taxo_gyrB <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Burkholderiales", "Enterobacterales", "NA", "Pseudomonadales", "Xanthomonadales", "Unknown", "Other", "Non-detected in seed and seedling")
+name_taxo_16S <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Betaproteobacteriales", "Enterobacteriales", "NA", "Pseudomonadales", "Xanthomonadales", "Flavobacteriales", "Unknown", "Other", "Non-detected in seed and seedling", "Sphingobacteriales")
+#Desired color palette
+OrderPalette_gyrB <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0","#000000", "#8F8E8E", "#000000")
+OrderPalette_16S <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0", "#FE9A5C" , "#000000", "#8F8E8E", "#000000", "#229F4F")
+#Associated name and color
+names(OrderPalette_gyrB) <- name_taxo_gyrB
+names(OrderPalette_16S) <- name_taxo_16S
+
+
+
+d.rank.16S.b <- read.csv("bean_16S_rank_all.csv", header=TRUE, sep = ";",  dec=".")
+
+#Plot
+plot.rank.16S.bean <-ggplot(d.rank.16S.b, aes(x=proportion_seed, y=proportion_seedling)) +  
+  geom_point(aes(colour=Order)) +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S) +
+  ggtitle("Bean - 16S")+
+  theme(legend.position = "bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Abundance in seedling") + xlab ("Abundance in seed")
+
+d.rank.16S.r <- read.csv("rad_16S_rank_all.csv", header=TRUE, sep = ";",  dec=".")
+plot.rank.16S.rad <-ggplot(d.rank.16S.r, aes(x=proportion_seed, y=proportion_seedling)) +
+  geom_point(aes(colour=Order)) +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S) +
+  ggtitle("Radish - 16S") + 
+  theme(legend.position = "bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Abundance in seedling") + xlab ("Abundance in seed")
+
+d.rank.gyrB.b <- read.csv("bean_gyrB_rank_all.csv", header=TRUE, sep = ";",  dec=",")
+
+plot.rank.gyrB.bean <-ggplot(d.rank.gyrB.b, aes(x=proportion_seed, y=proportion_seedling)) +
+  geom_point(aes(colour=Order)) +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB) + 
+  ggtitle("Bean - gyrB") + 
+  theme(legend.position = "bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Abundance in seedling") + xlab ("Abundance in seed")
+
+d.rank.gyrB.r <- read.csv("rad_gyrB_rank_all.csv", header=TRUE, sep = ";",  dec=".")
+plot.rank.gyrB.rad <-ggplot(d.rank.gyrB.r, aes(x=proportion_seed, y=proportion_seedling)) +
+  geom_point(aes(colour=Order))  +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB) +  
+    ggtitle("Radish - gyrB") + 
+  theme(legend.position = "bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Abundance in seedling") + xlab ("Abundance in seed")
+```
+
+```{r, echo=FALSE, message=FALSE}
+theme_set(theme_bw())
+library(gridExtra)
+cor_RA <- grid.arrange(plot.rank.16S.bean,
+plot.rank.16S.rad,
+plot.rank.gyrB.bean,
+plot.rank.gyrB.rad,
+ncol=2,
+nrow=2)
+```
+
+
+### 2.7 - Phylogenetic trees
+
+
+```{r, echo=FALSE, message=FALSE}
+#Subset dataset
+d16S.exp3.dy <- subset_samples(d16S.exp3, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+d16S.exp3.dy <- filter_taxa(d16S.exp3.dy, function(x) sum(x) > 0, TRUE) #141 taxa and 200 samples
+dgyrB.exp3.dy <- subset_samples(dgyrB.exp3, Seed %in% c("Detect") & Germinated %in% c("Yes"))
+dgyrB.exp3.dy <- filter_taxa(dgyrB.exp3.dy, function(x) sum(x) > 0, TRUE) #281 taxa and 188 samples
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+#Merge
+merged.d16S.exp3.dy <- merge_samples(d16S.exp3.dy, "Habitat")
+merged.dgyrB.exp3.dy <- merge_samples(dgyrB.exp3.dy, "Habitat")
+```
+
+## 3 - Germination
+
+We selected only seed samples in order to evaluate differences in microbiota composition and structure for germinated and non-germinated seeds.
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+d16S.exp3.b.seed <- subset_samples(d16S.exp3.b, Habitat %in% c("Seed"))
+d16S.exp3.b.seed <- filter_taxa(d16S.exp3.b.seed, function(x) sum(x) > 0, TRUE) # 274 taxa and 84 samples
+d16S.exp3.r.seed <- subset_samples(d16S.exp3.r, Habitat %in% c("Seed"))
+d16S.exp3.r.seed <- filter_taxa(d16S.exp3.r.seed, function(x) sum(x) > 0, TRUE) # 269 taxa and 93 samples
+dgyrB.exp3.b.seed <- subset_samples(dgyrB.exp3.b, Habitat %in% c("Seed"))
+dgyrB.exp3.b.seed <- filter_taxa(dgyrB.exp3.b.seed, function(x) sum(x) > 0, TRUE) # 503 taxa and 84 samples
+dgyrB.exp3.r.seed <- subset_samples(dgyrB.exp3.r, Habitat %in% c("Seed"))
+dgyrB.exp3.r.seed <- filter_taxa(dgyrB.exp3.r.seed, function(x) sum(x) > 0, TRUE) # 379 taxa and 91 samples
+```
+
+### 3.1 - Richness
+
+In this part we used rarefy data :   
+
+* **16S** : 4,000 reads per sample     
+* **gyrB** : 4,000 reads per sample   
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+r16S.b.seed <- rarefy_even_depth(d16S.exp3.b.seed, sample.size = 4000, rngseed = 700) 
+r16S.r.seed <- rarefy_even_depth(d16S.exp3.r.seed, sample.size = 4000, rngseed = 700)
+rgyrB.b.seed <- rarefy_even_depth(dgyrB.exp3.b.seed, sample.size = 4000, rngseed = 800)
+rgyrB.r.seed <- rarefy_even_depth(dgyrB.exp3.r.seed, sample.size = 4000, rngseed = 800)
+#Table of alpha-diversity estimators
+table_r16S.b.seed <- estimate_richness(r16S.b.seed, split = TRUE, measures=c("Observed"))
+table_r16S.r.seed <- estimate_richness(r16S.r.seed, split = TRUE, measures=c("Observed"))
+table_rgyrB.b.seed <- estimate_richness(rgyrB.b.seed, split = TRUE, measures=c("Observed"))
+table_rgyrB.r.seed <- estimate_richness(rgyrB.r.seed, split = TRUE, measures=c("Observed"))
+
+#Remove samples lost with rarefaction
+sample_data(d16S.exp3.b.seed) <- sample_data(d16S.exp3.b.seed)[rownames(sample_data(d16S.exp3.b.seed)) %in% row.names(table_r16S.b.seed), ] 
+sample_data(d16S.exp3.r.seed) <- sample_data(d16S.exp3.r.seed)[rownames(sample_data(d16S.exp3.r.seed)) %in% row.names(table_r16S.r.seed), ] 
+sample_data(dgyrB.exp3.b.seed) <- sample_data(dgyrB.exp3.b.seed)[rownames(sample_data(dgyrB.exp3.b.seed)) %in% row.names(table_rgyrB.b.seed), ] 
+sample_data(dgyrB.exp3.r.seed) <- sample_data(dgyrB.exp3.r.seed)[rownames(sample_data(dgyrB.exp3.r.seed)) %in% row.names(table_rgyrB.r.seed), ] 
+
+
+#Bind design + table of alpha_div
+datar16S.b.seed <- cbind(sample_data(d16S.exp3.b.seed), table_r16S.b.seed) 
+datar16S.r.seed <- cbind(sample_data(d16S.exp3.r.seed), table_r16S.r.seed) 
+datargyrB.b.seed <- cbind(sample_data(dgyrB.exp3.b.seed), table_rgyrB.b.seed) 
+datargyrB.r.seed <- cbind(sample_data(dgyrB.exp3.r.seed), table_rgyrB.r.seed) 
+
+#Change denomination
+datar16S.b.seed$Germinated<-ifelse(datar16S.b.seed$Germinated == "No",'Non-germinated',
+                                    ifelse(datar16S.b.seed$Germinated == "Yes",'Germinated','Germinated'))
+datar16S.r.seed$Germinated<-ifelse(datar16S.r.seed$Germinated == "No",'Non-germinated',
+                                    ifelse(datar16S.r.seed$Germinated == "Yes",'Germinated','Germinated'))
+datargyrB.b.seed$Germinated<-ifelse(datargyrB.b.seed$Germinated == "No",'Non-germinated',
+                                    ifelse(datargyrB.b.seed$Germinated == "Yes",'Germinated','Germinated'))
+datargyrB.r.seed$Germinated<-ifelse(datargyrB.r.seed$Germinated == "No",'Non-germinated',
+                                    ifelse(datargyrB.r.seed$Germinated == "Yes",'Germinated','Germinated'))
+
+
+#Plot Richness
+p.r16S.b.seed <- ggplot(data=datar16S.b.seed, aes_string(x='Germinated',y='Observed', fill='Germinated')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Germinated)) +
+  ggtitle("Bean - 16S") + 
+    facet_grid(~Germinated, scale = "free") +
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +  
+  stat_compare_means()
+
+p.r16S.r.seed <- ggplot(data=datar16S.r.seed, aes_string(x='Germinated',y='Observed', fill='Germinated')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Germinated)) +
+  ggtitle("Radish - 16S") + 
+  facet_grid(~Germinated, scale = "free") +
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means()
+
+p.rgyrB.b.seed <- ggplot(data=datargyrB.b.seed, aes_string(x='Germinated',y='Observed', fill='Germinated')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Germinated)) +
+  ggtitle("Bean - gyrB") + 
+    facet_grid(~Germinated, scale = "free") +
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +  
+  stat_compare_means()
+
+p.rgyrB.r.seed <- ggplot(data=datargyrB.r.seed, aes_string(x='Germinated',y='Observed', fill='Germinated')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Germinated)) +
+  ggtitle("Radish - gyrB") + 
+    facet_grid(~Germinated, scale = "free") +
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means()
+```
+
+```{r, echo=FALSE, message=FALSE}
+p.r16S.b.seed
+p.r16S.r.seed
+p.rgyrB.b.seed
+p.rgyrB.r.seed
+```
+
+### 3.2 - Population size
+
+We estimated the population size for germinated and non-germinated seeds.
+
+
+```{r, echo=FALSE, message=FALSE}
+data.cfu.seed <- subset(data.cfu,  Habitat %in% c("Seed"))
+
+#Change denomination
+data.cfu.seed$Germinated<-ifelse(data.cfu.seed$Germinated == "No",'Non-germinated',
+                                    ifelse(data.cfu.seed$Germinated == "Yes",'Germinated','Germinated'))
+
+data.cfu.seed.b <- subset(data.cfu.seed,  Plant.species %in% c("Bean"))
+data.cfu.seed.r <- subset(data.cfu.seed,  Plant.species %in% c("Radish"))
+#Plot
+p.logCFU.seed.b <- ggplot(data=data.cfu.seed.b, aes_string(x='Germinated',y='LogCFU_sample', fill='Germinated')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  ggtitle("Bean") + 
+   facet_grid(~Germinated, scale = "free") +
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Log CFU") +
+  scale_fill_manual(values=c("#31B404", "#21610B")) + 
+  scale_color_manual(values=c("#31B404", "#21610B")) +  
+  stat_compare_means()
+
+p.logCFU.seed.r <- ggplot(data=data.cfu.seed.r, aes_string(x='Germinated',y='LogCFU_sample', fill='Germinated')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  ggtitle("Radish") + 
+     facet_grid(~Germinated, scale = "free") +
+     theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Log CFU") +
+  scale_fill_manual(values=c("#DF3A01", "#8A0808")) + 
+  scale_color_manual(values=c("#DF3A01", "#8A0808")) +  
+  stat_compare_means()
+```
+
+```{r, echo=FALSE, message=FALSE}
+p.logCFU.seed.b
+p.logCFU.seed.r
+```
+
+
+
+### 3.3 - Taxonomy
+
+We estimated the taxonomic composition affiliated with germinated and non-germinated seeds.
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+d16S.exp3.b.seed.mer <- merge_samples(d16S.exp3.b.seed, "Germinated")
+d16S.exp3.r.seed.mer <- merge_samples(d16S.exp3.r.seed, "Germinated")
+dgyrB.exp3.b.seed.mer <- merge_samples(dgyrB.exp3.b.seed, "Germinated")
+dgyrB.exp3.r.seed.mer <- merge_samples(dgyrB.exp3.r.seed, "Germinated")
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+tax16S.b.seed <- plot_composition(d16S.exp3.b.seed.mer, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Germinated, scales="free_x", nrow=1) +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) +
+  ggtitle("Taxonomy - Bean - 16S") +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+tax16S.r.seed <- plot_composition(d16S.exp3.r.seed.mer, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Germinated, scales="free_x", nrow=1) +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) +
+  ggtitle("Taxonomy - Radish - 16S") +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+taxgyrB.b.seed <- plot_composition(dgyrB.exp3.b.seed.mer, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Germinated, scales="free_x", nrow=1) +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) +
+  ggtitle("Taxonomy - Bean - gyrB") +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+taxgyrB.r.seed <- plot_composition(dgyrB.exp3.r.seed.mer, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~Germinated, scales="free_x", nrow=1) +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white")) +
+  ggtitle("Taxonomy - Radish - gyrB") +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+
+```{r, echo=FALSE, message=FALSE}
+tax16S.b.seed
+tax16S.r.seed
+taxgyrB.b.seed
+taxgyrB.r.seed
+```
+
+### 3.4 - DeSeq2
+
+Identification of specific ASVs associated to germinating and non-germinating seeds was estimated with DeSeq2.          
+
+```{r, echo=FALSE, message=FALSE}
+
+#Palette taxo
+name_taxo_16S <- c("Arthrobacter", "Brevundimonas", "Clavibacter", "Curtobacterium", "Hymenobacter", "Massilia", "Pantoea", "Pseudomonas", "Sphingomonas", "Variovorax", "Chryseobacterium", "Enterobacter", "Klebsiella", "Neorhizobium", "Stenotrophomonas")
+
+name_taxo_gyrB <- c("Clavibacter", "Frigoribacterium",  "Paracoccus", "Pseudarthrobacter", "Massilia", "Pantoea", "Pseudomonas", "Sphingomonas", "unclassified",  "Achromobacter", "Escherichia", "Kosakonia", "Saccharibacillus",  "Streptomyces", "Stenotrophomonas","NA")
+#Desired color palette
+GenusPalette_16S <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" )
+
+GenusPalette_gyrB <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688",  "#65c3ba", "#000000", "#65c3ba", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" )
+#Associated name and color
+names(GenusPalette_gyrB) <- name_taxo_gyrB
+names(GenusPalette_16S) <- name_taxo_16S
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide"}
+#Transform to pseudo counts +1
+d16S.exp3.b.seed.t <-transform_sample_counts(d16S.exp3.b.seed,function(x) (1 + x))
+d16S.exp3.r.seed.t <-transform_sample_counts(d16S.exp3.r.seed,function(x) (1 + x))
+dgyrB.exp3.b.seed.t <-transform_sample_counts(dgyrB.exp3.b.seed,function(x) (1 + x))
+dgyrB.exp3.r.seed.t <-transform_sample_counts(dgyrB.exp3.r.seed,function(x) (1 + x))
+#Load DeSeq2
+library("DESeq2")
+dds <- phyloseq_to_deseq2(dgyrB.exp3.b.seed.t, ~ Germinated)
+dds2 <- DESeq(dds, test="LRT", reduced= ~ 1)
+des.res <- results(dds2, contrast=c("Germinated","No","Yes"))
+alpha = 0.01
+sigtab <- des.res[which(des.res$padj < alpha), ]
+sigtabup <- sigtab[which(sigtab$log2FoldChange>=2), ]
+sigtabdown <- sigtab[which(sigtab$log2FoldChange<=-2), ]
+sigtabup2 <- cbind(as(sigtabup, "data.frame"), as(tax_table(dgyrB.exp3.b.seed.t)[rownames(sigtabup), ], "matrix"))
+sigtabdown2 <- cbind(as(sigtabdown, "data.frame"), as(tax_table(dgyrB.exp3.b.seed.t)[rownames(sigtabdown), ], "matrix"))
+sigtabf_b_gyrB <- rbind(sigtabup2, sigtabdown2)
+
+dds <- phyloseq_to_deseq2(d16S.exp3.b.seed.t, ~ Germinated)
+dds2 <- DESeq(dds, test="LRT", reduced= ~ 1)
+des.res <- results(dds2, contrast=c("Germinated","No","Yes"))
+alpha = 0.01
+sigtab <- des.res[which(des.res$padj < alpha), ]
+sigtabup <- sigtab[which(sigtab$log2FoldChange>=2), ]
+sigtabdown <- sigtab[which(sigtab$log2FoldChange<=-2), ]
+sigtabup2 <- cbind(as(sigtabup, "data.frame"), as(tax_table(d16S.exp3.b.seed.t)[rownames(sigtabup), ], "matrix"))
+sigtabdown2 <- cbind(as(sigtabdown, "data.frame"), as(tax_table(d16S.exp3.b.seed.t)[rownames(sigtabdown), ], "matrix"))
+sigtabf_b_16S <- rbind(sigtabup2, sigtabdown2)
+
+
+dds <- phyloseq_to_deseq2(dgyrB.exp3.r.seed.t, ~ Germinated)
+dds2 <- DESeq(dds, test="LRT", reduced= ~ 1)
+des.res <- results(dds2, contrast=c("Germinated","No","Yes"))
+alpha = 0.01
+sigtab <- des.res[which(des.res$padj < alpha), ]
+sigtabup <- sigtab[which(sigtab$log2FoldChange>=2), ]
+sigtabdown <- sigtab[which(sigtab$log2FoldChange<=-2), ]
+sigtabup2 <- cbind(as(sigtabup, "data.frame"), as(tax_table(dgyrB.exp3.r.seed.t)[rownames(sigtabup), ], "matrix"))
+sigtabdown2 <- cbind(as(sigtabdown, "data.frame"), as(tax_table(dgyrB.exp3.r.seed.t)[rownames(sigtabdown), ], "matrix"))
+sigtabf_r_gyrB <- rbind(sigtabup2, sigtabdown2)
+
+dds <- phyloseq_to_deseq2(d16S.exp3.r.seed.t, ~ Germinated)
+dds2 <- DESeq(dds, test="LRT", reduced= ~ 1)
+des.res <- results(dds2, contrast=c("Germinated","No","Yes"))
+alpha = 0.01
+sigtab <- des.res[which(des.res$padj < alpha), ]
+sigtabup <- sigtab[which(sigtab$log2FoldChange>=2), ]
+sigtabdown <- sigtab[which(sigtab$log2FoldChange<=-2), ]
+sigtabup2 <- cbind(as(sigtabup, "data.frame"), as(tax_table(d16S.exp3.r.seed.t)[rownames(sigtabup), ], "matrix"))
+sigtabdown2 <- cbind(as(sigtabdown, "data.frame"), as(tax_table(d16S.exp3.r.seed.t)[rownames(sigtabdown), ], "matrix"))
+sigtabf_r_16S <- rbind(sigtabup2, sigtabdown2)
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+sigtabf_b_gyrB$ASV <- row.names(sigtabf_b_gyrB)
+sigtabf_b_gyrB$Plant.species <- c("Bean")
+sigtabf_r_gyrB$ASV <- row.names(sigtabf_r_gyrB)
+sigtabf_r_gyrB$Plant.species <- c("Radish")
+sigtabf_b_16S$ASV <- row.names(sigtabf_b_16S)
+sigtabf_b_16S$Plant.species <- c("Bean")
+sigtabf_r_16S$ASV <- row.names(sigtabf_r_16S)
+sigtabf_r_16S$Plant.species <- c("Radish")
+
+#geompoint
+Plot_Deseq_gyrB <- ggplot(sigtabf_b_gyrB)  + geom_point(aes(x=log2FoldChange, y=ASV, color = Genus, size = baseMean))+ 
+  facet_grid(~Plant.species, scales = "free")  + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major = element_blank())  + ggtitle ("Bean - gyrB") + 
+geom_vline(xintercept=0, linetype="dashed", 
+                color = "black", size=0.5)+
+    scale_fill_manual(values=GenusPalette_gyrB) +
+  scale_color_manual(values=GenusPalette_gyrB)
+
+Plot_Deseq_16S <- ggplot(sigtabf_b_16S)  + geom_point(aes(x=log2FoldChange, y=ASV, color = Genus, size = baseMean))+ 
+  facet_grid(~Plant.species, scales = "free")  + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major = element_blank())  + ggtitle ("Bean - 16S") + 
+geom_vline(xintercept=0, linetype="dashed", 
+                color = "black", size=0.5) +
+    scale_fill_manual(values=GenusPalette_16S) +
+  scale_color_manual(values=GenusPalette_16S)
+
+Plot_Deseq_gyrBr <- ggplot(sigtabf_r_gyrB)  + geom_point(aes(x=log2FoldChange, y=ASV, color = Genus, size = baseMean))+ 
+  facet_grid(~Plant.species, scales = "free")  + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major = element_blank())  + ggtitle ("Radish - gyrB") + 
+geom_vline(xintercept=0, linetype="dashed", 
+                color = "black", size=0.5) +
+    scale_fill_manual(values=GenusPalette_gyrB) +
+  scale_color_manual(values=GenusPalette_gyrB)
+
+Plot_Deseq_16Sr <- ggplot(sigtabf_r_16S)  + geom_point(aes(x=log2FoldChange, y=ASV, color = Genus, size = baseMean))+ 
+  facet_grid(~Plant.species, scales = "free")  + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major = element_blank())  + ggtitle ("Radish - 16S") + 
+geom_vline(xintercept=0, linetype="dashed", 
+                color = "black", size=0.5) +
+    scale_fill_manual(values=GenusPalette_16S) +
+  scale_color_manual(values=GenusPalette_16S)
+```
+```{r, echo=FALSE, message=FALSE}
+Plot_Deseq_16S
+Plot_Deseq_16Sr
+
+Plot_Deseq_gyrB
+Plot_Deseq_gyrBr
+```
+
+## 4 - Normal vs abnormal seedlings
+
+We evaluate differences in seedling phenotype (noraml or abnormal seed mat&met for more information) according to seed microbiota.
+
+
+### 4.1 - Richness
+
+Select seed and its corresponding seedling only     
+
+In this part we used rarefy data :   
+* **16S** : 4,000 reads per sample    
+* **gyrB** : 4,000 reads per sample  
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+d16S.exp3.b.dy.seed <- subset_samples(d16S.exp3.b.dy, Habitat %in% c("Seed"))
+d16S.exp3.b.dy.seed <- filter_taxa(d16S.exp3.b.dy.seed, function(x) sum(x) > 0, TRUE) #63 taxa and 43 samples
+dgyrB.exp3.b.dy.seed <- subset_samples(dgyrB.exp3.b.dy, Habitat %in% c("Seed"))
+dgyrB.exp3.b.dy.seed <- filter_taxa(dgyrB.exp3.b.dy.seed, function(x) sum(x) > 0, TRUE) #146 taxa and 44 samples
+d16S.exp3.b.dy.seedling <- subset_samples(d16S.exp3.b.dy, Habitat %in% c("Seedling"))
+d16S.exp3.b.dy.seedling <- filter_taxa(d16S.exp3.b.dy.seedling , function(x) sum(x) > 0, TRUE) #41 taxa and 43 samples
+dgyrB.exp3.b.dy.seedling <- subset_samples(dgyrB.exp3.b.dy, Habitat %in% c("Seedling"))
+dgyrB.exp3.b.dy.seedling <- filter_taxa(dgyrB.exp3.b.dy.seedling, function(x) sum(x) > 0, TRUE) #58 taxa and 44 samples
+d16S.exp3.r.dy.seed <- subset_samples(d16S.exp3.r.dy, Habitat %in% c("Seed"))
+d16S.exp3.r.dy.seed <- filter_taxa(d16S.exp3.r.dy.seed, function(x) sum(x) > 0, TRUE) #46 taxa and 57 samples
+dgyrB.exp3.r.dy.seed <- subset_samples(dgyrB.exp3.r.dy, Habitat %in% c("Seed"))
+dgyrB.exp3.r.dy.seed <- filter_taxa(dgyrB.exp3.r.dy.seed, function(x) sum(x) > 0, TRUE) #74 taxa and 50 samples
+d16S.exp3.r.dy.seedling <- subset_samples(d16S.exp3.r.dy, Habitat %in% c("Seedling"))
+d16S.exp3.r.dy.seedling <- filter_taxa(d16S.exp3.r.dy.seedling , function(x) sum(x) > 0, TRUE) #55 taxa and 57 samples
+dgyrB.exp3.r.dy.seedling <- subset_samples(dgyrB.exp3.r.dy, Habitat %in% c("Seedling"))
+dgyrB.exp3.r.dy.seedling <- filter_taxa(dgyrB.exp3.r.dy.seedling, function(x) sum(x) > 0, TRUE) #63 taxa and 50
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+r16S.b.dy.seed <- rarefy_even_depth(d16S.exp3.b.dy.seed, sample.size = 1500, rngseed = 700) 
+r16S.r.dy.seed <- rarefy_even_depth(d16S.exp3.r.dy.seed, sample.size = 1500, rngseed = 700)
+rgyrB.b.dy.seed <- rarefy_even_depth(dgyrB.exp3.b.dy.seed, sample.size = 1100, rngseed = 800)
+rgyrB.r.dy.seed <- rarefy_even_depth(dgyrB.exp3.r.dy.seed, sample.size = 1100, rngseed = 800)
+r16S.b.dy.seedling <- rarefy_even_depth(d16S.exp3.b.dy.seedling, sample.size = 1500, rngseed = 700) 
+r16S.r.dy.seedling <- rarefy_even_depth(d16S.exp3.r.dy.seedling, sample.size = 1500, rngseed = 700)
+rgyrB.b.dy.seedling <- rarefy_even_depth(dgyrB.exp3.b.dy.seedling, sample.size = 1100, rngseed = 800)
+rgyrB.r.dy.seedling <- rarefy_even_depth(dgyrB.exp3.r.dy.seedling, sample.size = 1100, rngseed = 800)
+#Table of alpha-diversity estimators
+table_r16S.b.dy.seed <- estimate_richness(r16S.b.dy.seed, split = TRUE, measures=c("Observed"))
+table_r16S.r.dy.seed <- estimate_richness(r16S.r.dy.seed, split = TRUE, measures=c("Observed"))
+table_rgyrB.b.dy.seed <- estimate_richness(rgyrB.b.dy.seed, split = TRUE, measures=c("Observed"))
+table_rgyrB.r.dy.seed <- estimate_richness(rgyrB.r.dy.seed, split = TRUE, measures=c("Observed"))
+table_r16S.b.dy.seedling <- estimate_richness(r16S.b.dy.seedling, split = TRUE, measures=c("Observed"))
+table_r16S.r.dy.seedling <- estimate_richness(r16S.r.dy.seedling, split = TRUE, measures=c("Observed"))
+table_rgyrB.b.dy.seedling <- estimate_richness(rgyrB.b.dy.seedling, split = TRUE, measures=c("Observed"))
+table_rgyrB.r.dy.seedling <- estimate_richness(rgyrB.r.dy.seedling, split = TRUE, measures=c("Observed"))
+#Bind design + table of alpha_div
+datar16S.b.dy.seed <- cbind(sample_data(d16S.exp3.b.dy.seed), table_r16S.b.dy.seed) 
+datar16S.r.dy.seed <- cbind(sample_data(d16S.exp3.r.dy.seed), table_r16S.r.dy.seed) 
+datargyrB.b.dy.seed <- cbind(sample_data(dgyrB.exp3.b.dy.seed), table_rgyrB.b.dy.seed) 
+datargyrB.r.dy.seed <- cbind(sample_data(dgyrB.exp3.r.dy.seed), table_rgyrB.r.dy.seed) 
+datar16S.b.dy.seedling <- cbind(sample_data(d16S.exp3.b.dy.seedling), table_r16S.b.dy.seedling) 
+datar16S.r.dy.seedling <- cbind(sample_data(d16S.exp3.r.dy.seedling), table_r16S.r.dy.seedling) 
+datargyrB.b.dy.seedling <- cbind(sample_data(dgyrB.exp3.b.dy.seedling), table_rgyrB.b.dy.seedling) 
+datargyrB.r.dy.seedling <- cbind(sample_data(dgyrB.exp3.r.dy.seedling), table_rgyrB.r.dy.seedling) 
+#Plot Richness
+p.r16S.b.dy.seed <- ggplot(data=datar16S.b.dy.seed, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Seedling_type)) +
+  ggtitle("Bean - 16S - seed") + 
+   theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#31B404")) + 
+  scale_color_manual(values=c("#31B404", "#31B404")) +  
+  stat_compare_means()
+
+p.r16S.r.dy.seed <- ggplot(data=datar16S.r.dy.seed, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Radish - 16S - seed") + 
+     theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#DF3A01")) + 
+  scale_color_manual(values=c("#DF3A01", "#DF3A01")) +  
+  stat_compare_means()
+
+p.rgyrB.b.dy.seed <- ggplot(data=datargyrB.b.dy.seed, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Seedling_type)) +
+  ggtitle("Bean - gyrB - seed") + 
+     theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#31B404")) + 
+  scale_color_manual(values=c("#31B404", "#31B404")) +  
+  stat_compare_means()
+
+p.rgyrB.r.dy.seed <- ggplot(data=datargyrB.r.dy.seed, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Radish - gyrB - seed") + 
+     theme(legend.position = "none",strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#DF3A01")) + 
+  scale_color_manual(values=c("#DF3A01", "#DF3A01")) +  
+  stat_compare_means()
+
+p.r16S.b.dy.seedling <- ggplot(data=datar16S.b.dy.seedling, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Seedling_type)) +
+  ggtitle("Richness - 16S- bean seedling") + 
+     theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#31B404")) + 
+  scale_color_manual(values=c("#31B404", "#31B404")) +  
+  stat_compare_means()
+
+p.r16S.r.dy.seedling <- ggplot(data=datar16S.r.dy.seedling, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Richness - 16S- radish seedling") + 
+     theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#DF3A01")) + 
+  scale_color_manual(values=c("#DF3A01", "#DF3A01")) +  
+  stat_compare_means()
+
+p.rgyrB.b.dy.seedling <- ggplot(data=datargyrB.b.dy.seedling, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Seedling_type)) +
+  ggtitle("Richness - gyrB- bean seedling") + 
+     theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#31B404", "#31B404")) + 
+  scale_color_manual(values=c("#31B404", "#31B404")) +  
+  stat_compare_means()
+
+p.rgyrB.r.dy.seedling <- ggplot(data=datargyrB.r.dy.seedling, aes_string(x='Seedling_type',y='Observed', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = Habitat)) +
+  ggtitle("Richness - gyrB- radish seedling") + 
+     theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  ylab("Observed ASV richness") +
+  scale_fill_manual(values=c("#DF3A01", "#DF3A01")) + 
+  scale_color_manual(values=c("#DF3A01", "#DF3A01")) +  
+  stat_compare_means()
+```
+
+```{r, echo=FALSE, message=FALSE}
+p.r16S.b.dy.seed
+p.r16S.r.dy.seed
+p.rgyrB.b.dy.seed
+p.rgyrB.r.dy.seed
+```
+
+
+### 4.2 - Population size
+
+We estimated the population size for germinated and non-germinated seeds.
+
+```{r, echo=FALSE, message=FALSE}
+data.cfu.dy <- subset(data.cfu,   Seed %in% c("Detect") & Germinated %in% c("Yes"))
+data.cfu.dy.b.seed <- subset(data.cfu.dy,  Plant.species %in% c("Bean") & Habitat %in% c("Seed"))
+data.cfu.dy.r.seed <- subset(data.cfu.dy,  Plant.species %in% c("Radish") & Habitat %in% c("Seed"))
+data.cfu.dy.b.seedling <- subset(data.cfu.dy,  Plant.species %in% c("Bean") & Habitat %in% c("Seedling"))
+data.cfu.dy.r.seedling <- subset(data.cfu.dy,  Plant.species %in% c("Radish") & Habitat %in% c("Seedling"))
+#Plot
+p.logCFU.dy.b.seed <- ggplot(data=data.cfu.dy.b.seed, aes_string(x='Seedling_type',y='LogCFU_sample', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  ggtitle("Bean seed") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  scale_fill_manual(values=c("#31B404", "#31B404")) + 
+  scale_color_manual(values=c("#31B404", "#31B404")) +  
+  stat_compare_means()
+
+p.logCFU.dy.b.seedling <- ggplot(data=data.cfu.dy.b.seedling, aes_string(x='Seedling_type',y='LogCFU_sample', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  ggtitle("Bean seed") + 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  scale_fill_manual(values=c("#21610B", "#21610B")) + 
+  scale_color_manual(values=c("#21610B", "#21610B")) +  
+  stat_compare_means()
+
+p.logCFU.dy.r.seed <- ggplot(data=data.cfu.dy.r.seed, aes_string(x='Seedling_type',y='LogCFU_sample', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  ggtitle("Radish seedling") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  scale_fill_manual(values=c("#DF3A01", "#DF3A01")) + 
+  scale_color_manual(values=c("#DF3A01", "#DF3A01")) +  
+  stat_compare_means()
+
+p.logCFU.dy.r.seedling <- ggplot(data=data.cfu.dy.r.seedling, aes_string(x='Seedling_type',y='LogCFU_sample', fill='Seedling_type')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  ggtitle("Radish seedling") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~Seedling_type, scale = "free") +
+  scale_fill_manual(values=c("#8A0808", "#8A0808")) + 
+  scale_color_manual(values=c("#8A0808", "#8A0808")) +  
+  stat_compare_means()
+```
+
+```{r, echo=FALSE, message=FALSE}
+theme_set(theme_bw())
+p.logCFU.dy.b.seed
+p.logCFU.dy.r.seed
+p.logCFU.dy.b.seedling
+p.logCFU.dy.r.seedling
+```
+
+### 4.3 - DeSeq2 normal vs abnormal seedling.
+
+Here we assessed if the RA of some specific ASV could be associated with abnormal and normal seedling with DeSeq2.       
+We only performed this analysis with bean due to balanced sampling of normal and abnormal seedlings.      
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Transform to pseudo counts +1
+d16S.exp3.b.dy.seed.t <-transform_sample_counts(d16S.exp3.b.dy.seed,function(x) (1 + x))
+d16S.exp3.b.dy.seedling.t <-transform_sample_counts(d16S.exp3.b.dy.seedling,function(x) (1 + x))
+dgyrB.exp3.b.dy.seed.t <-transform_sample_counts(dgyrB.exp3.b.dy.seed,function(x) (1 + x))
+dgyrB.exp3.b.dy.seedling.t <-transform_sample_counts(dgyrB.exp3.b.dy.seedling,function(x) (1 + x))
+#Load DeSeq2
+
+#Load DeSeq2
+library("DESeq2")
+dds <- phyloseq_to_deseq2(d16S.exp3.b.dy.seed.t, ~ Seedling_type)
+dds2 <- DESeq(dds, test="LRT", reduced= ~ 1)
+des.res <- results(dds2, contrast=c("Seedling_type","Abnormal","Normal"))
+alpha = 0.01
+sigtab <- des.res[which(des.res$padj < alpha), ]
+sigtabup <- sigtab[which(sigtab$log2FoldChange>=2), ]
+sigtabdown <- sigtab[which(sigtab$log2FoldChange<=-2), ]
+sigtabup2 <- cbind(as(sigtabup, "data.frame"), as(tax_table(d16S.exp3.b.dy.seed.t)[rownames(sigtabup), ], "matrix"))
+sigtabdown2 <- cbind(as(sigtabdown, "data.frame"), as(tax_table(d16S.exp3.b.dy.seed.t)[rownames(sigtabdown), ], "matrix"))
+sigtabf_b_seed_16S <- rbind(sigtabup2, sigtabdown2)
+
+dds <- phyloseq_to_deseq2(dgyrB.exp3.b.dy.seed.t, ~ Seedling_type)
+dds2 <- DESeq(dds, test="LRT", reduced= ~ 1)
+des.res <- results(dds2, contrast=c("Seedling_type","Abnormal","Normal"))
+alpha = 0.01
+sigtab <- des.res[which(des.res$padj < alpha), ]
+sigtabup <- sigtab[which(sigtab$log2FoldChange>=2), ]
+sigtabdown <- sigtab[which(sigtab$log2FoldChange<=-2), ]
+sigtabup2 <- cbind(as(sigtabup, "data.frame"), as(tax_table(dgyrB.exp3.b.dy.seed.t)[rownames(sigtabup), ], "matrix"))
+sigtabdown2 <- cbind(as(sigtabdown, "data.frame"), as(tax_table(dgyrB.exp3.b.dy.seed.t)[rownames(sigtabdown), ], "matrix"))
+sigtabf_b_seed_gyrB <- rbind(sigtabup2, sigtabdown2)
+```
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+
+sigtabf_b_seed_16S$ASV <- row.names(sigtabf_b_seed_16S)
+sigtabf_b_seed_16S$Plant.species <- c("Bean")
+sigtabf_b_seed_gyrB$ASV <- row.names(sigtabf_b_seed_gyrB)
+sigtabf_b_seed_gyrB$Plant.species <- c("Bean")
+
+#geompoint
+Plot_Deseq_gyrB <- ggplot(sigtabf_b_seed_gyrB)  + geom_point(aes(x=log2FoldChange, y=ASV, color = Genus, size = baseMean))+ 
+  facet_grid(~Plant.species, scales = "free")  + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major = element_blank())  + ggtitle ("Bean - gyrB") + 
+geom_vline(xintercept=0, linetype="dashed", 
+                color = "black", size=0.5)
+
+Plot_Deseq_16S <- ggplot(sigtabf_b_seed_16S)  + geom_point(aes(x=log2FoldChange, y=ASV, color = Genus, size = baseMean))+ 
+  facet_grid(~Plant.species, scales = "free")  + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major = element_blank())  + ggtitle ("Bean - 16S") + 
+geom_vline(xintercept=0, linetype="dashed", 
+                color = "black", size=0.5) 
+```
+
+```{r, echo=FALSE, message=FALSE}
+Plot_Deseq_gyrB
+Plot_Deseq_16S
+```
+
+## 5 - ASV plant inoculation
+
+### 5.1 - Seedling phenotype
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(ggplot2)
+
+##Bean
+TEbean <- read.table(file="Seedling_transmission_inplanta.txt",sep="\t",header=TRUE)
+head(TEbean)
+
+TEbean <- subset(TEbean, !Souches %in% c("Témoin"))
+TEbean <- subset(TEbean, !Phenotype %in% c("ND"))
+
+#Transmission manip total 
+
+#Manage data frame
+Souches<- c( "Brutes", "T_Desinf", "B056", "B175", "B029", "B038", "B078")
+y<- c(1.04,1.04,1.04,1.04,1.04,1.04,1.04)
+stats<- c("ns","", "***","*","ns","*","**")
+sum<- c("n=30","n=90", "n=52","n=29","n=56","n=56","n=60")
+Phenotype <- c("Abnormal","Abnormal","Abnormal","Abnormal","Abnormal","Abnormal", "Abnormal" )
+Groupstats <- data.frame(Souches,y,stats, Phenotype, sum)
+Groupstats$ASV <- c( "N_desinf","Desinf", "ASV1_1","ASV1_2", "ASV474", "ASV85", "ASV90")
+
+Groupstats$ASV <- factor(Groupstats$ASV, 
+                         levels = c("Desinf", "N_desinf", "ASV474","ASV85", "ASV90", "ASV1_1", "ASV1_2"))
+
+#Manage data frame NG vs G
+Souches<- c( "Brutes", "T_Desinf", "B056", "B175", "B029", "B038", "B078")
+y<- c(1.04,1.04,1.04,1.04,1.04,1.04,1.04)
+stats<- c("ns","", "***","*","ns","ns","ns")
+sum<- c("n=30","n=91", "n=65","n=32","n=58","n=57","n=60")
+Phenotype <- c("Normal","Normal","Normal","Normal","Normal","Normal", "Normal" )
+Groupstats_NG <- data.frame(Souches,y,stats, Phenotype, sum)
+Groupstats_NG$ASV <- c( "N_desinf","Desinf", "ASV1_1","ASV1_2", "ASV474", "ASV85", "ASV90")
+
+Groupstats_NG$ASV <- factor(Groupstats_NG$ASV, 
+                         levels = c("Desinf", "N_desinf", "ASV474","ASV85", "ASV90", "ASV1_1", "ASV1_2"))
+
+
+
+#Subset dataset
+TEbean_tot <- subset(TEbean, Host %in% c("Bean"))
+
+#TEbean_tot <- subset(TEbean_tot, !Souches %in% c("Brutes"))
+
+TEbean_tot$ASV <- factor(TEbean_tot$ASV, 
+                         levels = c("Desinf", "N_desinf", "ASV474","ASV85", "ASV90", "ASV1_1", "ASV1_2"))
+
+TEbean_tot$Phenotype <- factor(TEbean_tot$Phenotype, 
+                         levels = c("Non-germinated", "Abnormal", "Normal"))
+
+#Final plot
+
+TEbean_tot
+Transmi_tot <- ggplot(TEbean_tot, aes(ASV, fill = factor(Phenotype))) + 
+  geom_bar(position = "fill") +
+  labs(fill="Seedling phenotype") +
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+  facet_grid(~ASV, scales = "free") + ggtitle("Bean detection")+ 
+    geom_text( data   = Groupstats, mapping = aes(x = ASV, y = y, label = stats), size = 4) +
+   geom_text( data   = Groupstats, mapping = aes(x = ASV, y = -0.025, label = sum), size = 4) +
+  scale_fill_manual(values=c("#424242","#98438C", "#74ABD1")) +
+  scale_colour_manual(values=c("#424242","#98438C", "#74ABD1")) +
+  ylab ("Proportion of seedling (%)")
+Transmi_tot
+```
+
+```{r, echo=FALSE, message=FALSE}
+Transmi_tot
+```
+
+### 5.2 - Statistiques
+
+Statistic tests were performed using chi2, comparing Decinfected seeds with tested conditions.
+
+```{r, echo=FALSE, message=FALSE, fig.show='hide'}
+Stats <- read.table(file="Pa_vs_Pn_stats.txt",sep="\t",dec=",",header=TRUE, row.names = 1)
+
+Stats_PN_vs_PANG <- Stats[c("PN", "PA"),]
+
+Stats_PN_vs_PANG$T_Desinf <- as.numeric(Stats_PN_vs_PANG$T_Desinf)
+Stats_PN_vs_PANG$B056 <- as.numeric(Stats_PN_vs_PANG$B056)
+Stats_PN_vs_PANG$B175 <- as.numeric(Stats_PN_vs_PANG$B175)
+Stats_PN_vs_PANG$B029 <- as.numeric(Stats_PN_vs_PANG$B029)
+Stats_PN_vs_PANG$B038 <- as.numeric(Stats_PN_vs_PANG$B038)
+Stats_PN_vs_PANG$B078 <- as.numeric(Stats_PN_vs_PANG$B078)
+
+
+Stats_D_vs_B056 <- Stats_PN_vs_PANG[c("T_Desinf", "B056")]
+Stats_D_vs_B175 <- Stats_PN_vs_PANG[c("T_Desinf", "B175")]
+Stats_D_vs_B029 <- Stats_PN_vs_PANG[c("T_Desinf", "B029")]
+Stats_D_vs_B038 <- Stats_PN_vs_PANG[c("T_Desinf", "B038")]
+Stats_D_vs_B078 <- Stats_PN_vs_PANG[c("T_Desinf", "B078")]
+
+chisq.test(Stats_D_vs_B056, correct=FALSE)
+chisq.test(Stats_D_vs_B056, correct=FALSE)$expected
+
+chisq.test(Stats_D_vs_B056, correct=FALSE)
+chisq.test(Stats_D_vs_B056, correct=FALSE)$expected
+
+chisq.test(Stats_D_vs_B175, correct=FALSE)
+chisq.test(Stats_D_vs_B175, correct=FALSE)$expected
+
+chisq.test(Stats_D_vs_B029, correct=FALSE)
+chisq.test(Stats_D_vs_B029, correct=FALSE)$expected
+
+chisq.test(Stats_D_vs_B038, correct=FALSE)
+chisq.test(Stats_D_vs_B038, correct=FALSE)$expected
+
+chisq.test(Stats_D_vs_B078, correct=FALSE)
+chisq.test(Stats_D_vs_B078, correct=FALSE)$expected
+```
+
+*****
+
+# End of script
+
+Chesneau et al., 2021     
+title: "Single seed microbiota: assembly and transmission from parent plant to seedling"      
+
+
+

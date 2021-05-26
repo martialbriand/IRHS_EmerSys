@@ -1,0 +1,3708 @@
+---
+title: "Single seed microbiota: assembly and transmission from parent plant to seedling"
+author: "Chesneau et al., 2021"
+date: "21/05/2021"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE, autodep = TRUE, warning = FALSE)
+#Set working direction
+knitr::opts_knit$set(root.dir = "~/These2/Script R/F2S-diversite/F2S-year-4/Final_GitHub/Dataset2") 
+```
+
+# Before you start
+
+This script has been made on R 4.0.0 (and Rstudio 1.2.5019)
+```{r R version}
+R.version
+#Load theme set
+library(ggplot2)
+theme_set(theme_bw())
+```
+
+
+# Data information
+**Project:** ANR SEEDS
+
+**Experiment 2 :** "Community assembly at the individual seed level"
+
+**Factors :**     
+
+* Plant species : bean (*Phaseolus vulgaris*) and radish (*Raphanus sativus*)       
+* Habitats sampled : Buds flower, Open flowers, Seeds, Stem, Air     
+* Seed developmental stages : D27, D33, D42, D50 (bean) and D26, D37, D65 (radish)       
+* At each developmental 5-7 plants were harvested. 720-480 seeds (bean-radish) / 150 bacterial mates        
+* DNA extraction : MN Food on CFU - after enrichment on TSA10%       
+* Primers : v4 region of 16S rRNA gene (Caporaso et al., 2011) and *gyrB* (Barret et al., 2015)      
+* 3 sequencing runs (MiSeq v2 - 500 cycles )      
+
+
+# 1- Seed water content
+
+For each plant (5) sampled at each stage of seed development, fresh weight and dry weight of a bulk of 15 seeds  were measured to estimate their water content.
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+WC <- read.table(file="Water_content/water_content.csv",sep=";",dec=".",header=TRUE)
+WC.bean <- subset(WC, Species=='Bean')
+WC.rad <- subset(WC, Species!='Bean')
+
+kruskal.test(Water_content ~ Stage, WC.bean) #significant p-value = 0.0004781
+library(FSA); packageVersion('FSA')
+library(rcompanion); packageVersion('rcompanion')
+PT <- dunnTest(Water_content ~ Stage, WC.bean)
+PT2 <- PT$res
+Groupbean <- cldList(comparison = PT2$Comparison, 
+                       p.value    = PT2$P.adj,
+                       threshold  = 0.01) # Significative groups
+colnames(Groupbean)[1] <- c("Stage")
+Groupbean$Stage <- c( "D27", "D33", "D42", "D50")
+Groupbean$x <- c( "P3")
+
+library(ggplot2); packageVersion('ggplot2')
+theme_set(theme_bw())
+plot.WC.bean <- ggplot(WC.bean, aes (x=Plant, y=Water_content)) +
+  geom_jitter(aes(color=factor(Stage)),size=4, width =0.25) +
+  labs(title="Bean", x="Plant individual", y = "Seed Water content (%)") +
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +  
+  scale_y_continuous(limits=c(0,100))  +
+    facet_grid(~Stage, scales="free") + 
+    geom_text( data   = Groupbean, mapping = aes(x = x, y = 100, label = Letter), size = 5) + 
+      scale_color_manual(values=c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B"))
+
+kruskal.test(Water_content ~ Stage, WC.rad) #significant p-value = 0.00571
+PT <- dunnTest(Water_content ~ Stage, WC.rad)
+PT2 <- PT$res
+Groupradish <- cldList(comparison = PT2$Comparison, 
+                       p.value    = PT2$P.adj,
+                       threshold  = 0.01) # Significative groups
+colnames(Groupradish)[1] <- c("Stage")
+Groupradish$x <- c( "P3")
+
+plot.WC.rad<- ggplot(WC.rad, aes (x=Plant, y=Water_content)) +
+  geom_jitter(aes(color=factor(Stage)), size=4, width =0.25) +
+  labs(title="Radish", x="Plant individual", y = "Seed Water content (%)") +
+theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +  
+    scale_y_continuous(limits=c(0,100)) +
+    facet_grid(~Stage, scales="free") + 
+    geom_text( data   = Groupradish, mapping = aes(x = x, y = 100, label = Letter), size = 5) + 
+      scale_color_manual(values=c("#F6E3CE", "#FAAC58", "#DF3A01"))
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+library(cowplot); packageVersion('cowplot')
+plot.WC <- plot_grid(plot.WC.bean, plot.WC.rad, ncol = 2)
+plot.WC
+```
+
+
+# 2 - Number of CFU
+
+```{r, echo=FALSE, message=FALSE, results="hide"}
+seed <- read.csv("Microbiology/CFU_seed.csv", sep = ";",  check.names=FALSE, row.names=1)
+seed.bean <- subset(seed, Species=='Bean')
+seed.rad <- subset(seed, Species=='Radish')
+```
+
+### 2.1 - Percentage of contamination per stage
+We splitted our dataset in 2 parts :     
+
+* Contamination = No, no CFU detected on the plate     
+* Contamination = yes,  at least 1 CFU on the plate     
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#GLM
+library(lme4)
+library(MASS)
+mod.bean <- glm(Contamination ~ DAP * Plant, family = binomial(link = "logit"), data = seed.bean)
+mod.bean2 <- glm(Contamination ~ DAP , family = binomial(link = "logit"), data = seed.bean)
+summary(mod.bean)
+#check if model fits the data
+1- pchisq(summary(mod.bean)$deviance,
+          summary(mod.bean)$df.residual) #OK 0.328
+
+mod.rad <- glm(Contamination ~ DAP * Plant, family = binomial(link = "logit"), data = seed.rad)
+mod.rad2 <- glm(Contamination ~ DAP * Plant, family = binomial(link = "logit"), data = seed.rad)
+summary(mod.rad)
+1- pchisq(summary(mod.rad)$deviance,
+          summary(mod.rad)$df.residual) #border line (0.0177) but let's pretend it fit
+library(car)
+Anova(mod.bean) 
+Anova(mod.rad)
+library(multcompView)
+library(emmeans)
+
+emm.bean.dap <- emmeans(mod.bean2, ~ DAP) # Two DAP (D27 and D33) nonEst !!! Because of P7 (needed to creat a model without Plant)
+stat_bean <- multcomp::cld(emm.bean.dap, alpha = 0.01, Letters= letters)
+emm.rad.dap <- emmeans(mod.rad2, ~ DAP)
+stat_rad <- multcomp::cld(emm.rad.dap, alpha = 0.01, Letters= letters)
+
+emm.bean.plant <- emmeans(mod.bean, ~ Plant | DAP)
+stat_bean_pl <- multcomp::cld(emm.bean.plant, alpha = 0.01, Letters= letters)
+emm.rad.plant <- emmeans(mod.rad, ~ Plant | DAP)
+stat_rad_pl <- multcomp::cld(emm.rad.plant, alpha = 0.01, Letters= letters) # How to add this infomation on graph ?
+
+#Manage data frame for DAP stats
+DAp_stats_bean <- data.frame(group = c(stat_bean$.group), DAP = (c("D33", "D50", "D27", "D42")))
+library(tidyr)
+DAp_stats_bean_f <- unite(DAp_stats_bean, stats, c("DAP", "group"), sep = "")
+DAp_stats_bean_f2 <- DAp_stats_bean_f$stats
+names(DAp_stats_bean_f2) <- c("D33", "D50", "D27", "D42")
+
+DAp_stats_rad <- data.frame(group = c(stat_rad$.group), DAP = c("D26", "D37", "D65"))
+library(tidyr)
+DAp_stats_rad_f <- unite(DAp_stats_rad, stats, c("DAP", "group"), sep = "")
+DAp_stats_rad_f2 <- DAp_stats_rad_f$stats
+names(DAp_stats_rad_f2) <- c("D26", "D37", "D65")
+
+#Manage data frame for plant stats
+stat_bean_pl <- as.data.frame(stat_bean_pl)
+stat_bean_pl$Contamination<- c(0)
+stat_bean_pl <- stat_bean_pl[complete.cases(stat_bean_pl), ]
+stat_bean_pl <- as.data.frame(apply(stat_bean_pl,2,function(x)gsub('\\s+', '',x)))
+
+stat_rad_pl <- as.data.frame(stat_rad_pl)
+stat_rad_pl$Contamination<- c(0)
+stat_rad_pl <- as.data.frame(apply(stat_rad_pl,2,function(x)gsub('\\s+', '',x)))
+
+
+#Plot per plant
+library(ggplot2)
+
+seed.bean$Contamination<-ifelse(seed.bean$Contamination == 0,'No',
+                                    ifelse(seed.bean$Contamination == 1,'Yes','Yes'))
+
+conta.all.bean <- ggplot(seed.bean, aes(Plant, fill = factor(Contamination, levels=c("No", "Yes")))) + 
+  geom_bar(position="fill") +
+  labs(fill="CFU detected") +
+  ggtitle("Bean") +
+  scale_fill_manual(values=c("#4643433B", "#888686")) +
+  facet_grid(~DAP, scales = "free", labeller = labeller(DAP = DAp_stats_bean_f2)) +
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+   ylab ("Percentage of seeds (%)") +
+   geom_text( data    = stat_bean_pl, mapping = aes(x = Plant, y = 0.95, label = .group), size = 3, vjust = 0 )
+
+seed.rad$Contamination<-ifelse(seed.rad$Contamination == 0,'No',
+                                    ifelse(seed.rad$Contamination == 1,'Yes','Yes'))
+
+conta.all.radish <- ggplot(seed.rad, aes(Plant, fill = factor(Contamination, levels=c("No", "Yes")))) + 
+  geom_bar(position="fill") +
+  labs(fill="CFU detected") +
+  ggtitle("Radish") +
+    scale_fill_manual(values=c("#4643433B", "#888686")) +
+  facet_grid(~DAP, scales = "free", labeller = labeller(DAP = DAp_stats_rad_f2)) +
+    theme(legend.position ="bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+ ylab ("Percentage of seeds (%)") +
+   geom_text( data  = stat_rad_pl, mapping = aes(x = Plant, y = 0.95, label = .group), size = 3)
+```
+
+```{r, echo=FALSE, message=FALSE}
+conta.all.bean
+conta.all.radish
+```
+
+# 3 - Sequence analyses 
+
+## 3.1 - Remove primers with cutadapt v1.15
+```
+for i in `cat group`; do cutadapt --discard-untrimmed -o $i.gyrB.R1.fq -p $i.gyrB.R2.fq -g MGNCCNGSNATGTAYATHGG -G ACNCCRTGNARDCCDCCNGA -e 0.1  -O 20 $i*L001_R1_001.fastq.gz $i*_L001_R2_001.fastq.gz; done
+for i in `cat group`; do cutadapt --discard-untrimmed -o $i.16S.R1.fq -p $i.16S.R2.fq -g GTGCCAGCMGCCGCGGTAA -G GGACTACHVGGGTWTCTAAT -e 0 -O 19 $i*_L001_R1_001.fastq.gz $i*_L001_R2_001.fastq.gz; done
+```
+
+## 3.2 - Convert fastq to ASV table (dada2)
+To save computing time, the code is not evaluated in the version of the document and the results are not included.
+
+```{r echo=FALSE, eval = FALSE}
+library(dada2); packageVersion("dada2")
+#Adapt from https://benjjneb.github.io/dada2/tutorial.html
+#Start with 16S rRNA gene (v4)
+path <- "~/Documents/test/B2S_Y1/16S/" 
+list.files(path)
+fnFs <- sort(list.files(path, pattern="16S.R1.fq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="16S.R2.fq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+plotQualityProfile(fnFs[1:8]) #select 200 (run1) - 200 (run2) - 200 (run3) - 200 (run4)
+plotQualityProfile(fnRs[1:8]) #select 160 (run1) - 200 (run2) - 180 (run3) - 160 (run4)
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(200,180),
+                     maxN=0, maxEE=c(1,1), truncQ=5, rm.phix=TRUE,
+                     compress=TRUE, multithread=TRUE) # 
+head(out)
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE) #without pooling or pseudo-pooling (no need to detect rare ASV)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+dadaFs[[1]]
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+seqtab2 <- seqtab[,nchar(colnames(seqtab)) %in% 250:256]
+dim(seqtab2)
+#Detect/Remove chimera
+seqtab.nochim <- removeBimeraDenovo(seqtab2, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab2)
+#Summary
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+
+#Continue with gyrB
+path <- "~/Documents/F2S/Year4/F2S_Y4B/gyrB/" 
+list.files(path)
+fnFs <- sort(list.files(path, pattern="gyrB.R1.fq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="gyrB.R2.fq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+plotQualityProfile(fnFs[1:8]) #select 200 (run1) - 200 (run2) -  200 (run3) - 200 (run4)
+plotQualityProfile(fnRs[1:8]) #select 160 (run1) - 200 (run2) -  180 (run3) - 160 (run4)
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(200,180),
+                     maxN=0, maxEE=c(1,1), truncQ=5, rm.phix=TRUE,
+                     compress=TRUE, multithread=TRUE) # 
+head(out)
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE) #without pooling or pseudo-pooling (no need to detect rare ASV)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+dadaFs[[1]]
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+#Since gyrB is a protein-coding genes only triplets should be conserved (244-247-250-253-256-259-262-265-268)
+seqtab244 <- seqtab[,nchar(colnames(seqtab)) %in% 244]
+seqtab247 <- seqtab[,nchar(colnames(seqtab)) %in% 247]
+seqtab250 <- seqtab[,nchar(colnames(seqtab)) %in% 250]
+seqtab253 <- seqtab[,nchar(colnames(seqtab)) %in% 253]
+seqtab256 <- seqtab[,nchar(colnames(seqtab)) %in% 256]
+seqtab259 <- seqtab[,nchar(colnames(seqtab)) %in% 259]
+seqtab262 <- seqtab[,nchar(colnames(seqtab)) %in% 262]
+seqtab265 <- seqtab[,nchar(colnames(seqtab)) %in% 265]
+seqtab268 <- seqtab[,nchar(colnames(seqtab)) %in% 268]
+#Merge all files
+seq.final <- cbind(seqtab244, seqtab247, seqtab250, seqtab253, seqtab256, seqtab259, seqtab262, seqtab265, seqtab268) 
+dim(seq.final)
+sum(seq.final)/sum(seqtab)
+#Detect/Remove chimera
+seqtab.nochim <- removeBimeraDenovo(seq.final, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seq.final)
+#Detect stop codons
+#Summary
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+saveRDS(seqtab.nochim, "~/Documents/F2S/Year4/ASV_gyrB_run2.rds")
+
+#Merge multiple runs
+st1 <- readRDS("ASV_16S_run1.rds")
+st2 <- readRDS("ASV_16S_run2.rds")
+st3 <- readRDS("ASV_16S_run3.rds")
+st4 <- readRDS("ASV_16S_run4.rds")
+all16S <- mergeSequenceTables(st1, st2, st3, st4)
+saveRDS(all16S, "~/Documents/F2S/Year4/ASV_16S.rds")
+st5 <- readRDS("ASV_gyrB_run1.rds")
+st6 <- readRDS("ASV_gyrB_run2.rds")
+st7 <- readRDS("ASV_gyrB_run3.rds")
+st8 <- readRDS("ASV_gyrB_run4.rds")
+allgyrB <- mergeSequenceTables(st5, st6, st7, st8)
+saveRDS(allgyrB, "~/Documents/F2S/Year4/ASV_gyrB.rds")
+
+# Assign taxonomy (RDP)
+taxa <- assignTaxonomy(all16S, "~/Documents/DB/silva_nr_v132_train_set.fa.gz", multithread=TRUE)
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+saveRDS(taxa, "~/Documents/F2S/Year4/16S_taxo.rds")
+taxa.g <- assignTaxonomy(allgyrB, "~/Documents/DB/train_set_gyrB_v4.fa.gz", multithread=TRUE)
+taxa.print.g <- taxa.g # Removing sequence rownames for display only
+rownames(taxa.print.g) <- NULL
+head(taxa.print.g)
+saveRDS(taxa.g, "~/Documents/F2S/Year4/gyrB_taxo.rds")
+
+#IDtaxa taxonomic affiliation
+library(DECIPHER); packageVersion("DECIPHER")
+dna <- DNAStringSet(getSequences(all16S)) # Create a DNAStringSet from the ASVs
+load("~/Documents/DB/SILVA_SSU_r132_March2018.RData") # CHANGE TO THE PATH OF YOUR TRAINING SET
+ids <- IdTaxa(dna, trainingSet, strand="top", processors=NULL, verbose=FALSE) # use all processors
+ranks <- c("domain", "phylum", "class", "order", "family", "genus", "species") # ranks of interest
+# Convert the output object of class "Taxa" to a matrix analogous to the output from assignTaxonomy
+taxid <- t(sapply(ids, function(x) {
+  m <- match(ranks, x$rank)
+  taxa <- x$taxon[m]
+  taxa[startsWith(taxa, "unclassified_")] <- NA
+  taxa
+}))
+colnames(taxid) <- ranks; rownames(taxid) <- getSequences(all16S)
+taxa2 <- taxid
+taxa.print2 <- taxa2 # Removing sequence rownames for display only
+rownames(taxa.print2) <- NULL
+head(taxa.print2)
+saveRDS(taxa2, "~/Documents/F2S/Year4/16S_taxo2.rds")
+```
+
+*****
+# 4 - Filtering data
+
+## 4.1 - Construct phyloseq objects
+*gyrB : 6784 taxa and 1536 samples*  
+*16S : 3505 taxa and 1536 samples* 
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+#Create phyloseq objects
+asvgyrB <- readRDS("ASV_gyrB.rds")
+taxgyrB <- readRDS("gyrB_taxo.rds")
+asv16S <- readRDS("ASV_16S.rds")
+tax16S <- readRDS("16S_taxo2.rds")
+design <- read.csv("design_full2.csv", sep = ";",  check.names=FALSE, row.names=1)
+rownames(asvgyrB) <- rownames(design)
+rownames(asv16S) <- rownames(design)
+psgyrB_0 <- phyloseq(tax_table(taxgyrB), sample_data(design),
+                   otu_table(asvgyrB, taxa_are_rows = FALSE))
+ps16S_0 <- phyloseq(tax_table(tax16S), sample_data(design),
+                  otu_table(asv16S, taxa_are_rows = FALSE))
+```
+
+## 4.2 - ASVs filtering
+
+* Remove empty samples 
+* Filtered ASVs based on taxonomy  
+* Rename ASVs 
+* Assess distribution of ASVs in positive and negative controls  
+* Subset Samples (remove sample with less than 1000 reads per sample)    
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+#Remove empty samples
+psgyrB_1 <- subset_samples(psgyrB_0, Sample_or_Control !="Empty")
+psgyrB_2 <- filter_taxa(psgyrB_1, function(x) sum(x) > 0, TRUE)
+ps16S_1 <- subset_samples(ps16S_0, Sample_or_Control !="Empty")
+ps16S_2 <- filter_taxa(ps16S_1, function(x) sum(x) > 0, TRUE)
+#Filtered ASV based on taxonomy
+psgyrB_3 <- subset_taxa(psgyrB_2, !is.na(Kingdom) & !Kingdom %in% c("parE") & !is.na(Phylum))
+ps16S_3 <- subset_taxa(ps16S_2, !is.na(domain) & !is.na(phylum) & !order %in% c("Chloroplast") & !family %in% c("Mitochondria"))
+#Rename ASV
+dna.gyrB <- Biostrings::DNAStringSet(taxa_names(psgyrB_3))
+names(dna.gyrB) <- taxa_names(psgyrB_3)
+psgyrB_4 <- merge_phyloseq(psgyrB_3, dna.gyrB)
+taxa_names(psgyrB_4) <- paste0("ASV", seq(ntaxa(psgyrB_4)))
+dna.16S <- Biostrings::DNAStringSet(taxa_names(ps16S_3))
+names(dna.16S) <- taxa_names(ps16S_3)
+ps16S_4 <- merge_phyloseq(ps16S_3, dna.16S)
+taxa_names(ps16S_4) <- paste0("ASV", seq(ntaxa(ps16S_4)))
+#Assess distribution of ASV in positive and negative controls
+c.gyrB.1 <- subset_samples(psgyrB_4, Sample_or_Control !="Sample")
+c.gyrB.2 <- filter_taxa(c.gyrB.1, function(x) sum(x) > 0, TRUE)
+myTaxa.gyrB <- names(sort(taxa_sums(c.gyrB.2), decreasing = TRUE))
+c.gyrB.f <- prune_taxa(myTaxa.gyrB, psgyrB_4)
+write.csv(otu_table(c.gyrB.f), "control_gyrB.csv")
+Biostrings::writeXStringSet(refseq(c.gyrB.f), "gyrB.fa")
+c.16S.1 <- subset_samples(ps16S_4, Sample_or_Control !="Sample")
+c.16S.2 <- filter_taxa(c.16S.1, function(x) sum(x) > 0, TRUE)
+myTaxa.16S <- names(sort(taxa_sums(c.16S.2), decreasing = TRUE))
+c.16S.f <- prune_taxa(myTaxa.16S, ps16S_4)
+write.csv(otu_table(c.16S.f), "control_16S.csv")
+#Subset Samples (remove sample with less than 1000 counts)
+ps16S_5 <- prune_samples(sample_sums(ps16S_4)>=1000, ps16S_4)
+ps16S_6 <- filter_taxa(ps16S_5, function(x) sum(x) > 0, TRUE)
+psgyrB_5 <- prune_samples(sample_sums(psgyrB_4)>=1000, psgyrB_4)
+psgyrB_6 <- filter_taxa(psgyrB_5, function(x) sum(x) > 0, TRUE)
+
+#Filter ASV (keep ASV > 1% RA per sample)
+psgyrB_7 <- transform_sample_counts(psgyrB_6,function(x) ifelse((x/sum(x))>=0.01 ,x,0))
+psgyrB_8 <- filter_taxa(psgyrB_7,function(x) sum (x)>0, TRUE)
+ps16S_7 <- transform_sample_counts(ps16S_6,function(x) ifelse((x/sum(x))>=0.01 ,x,0))
+ps16S_8 <- filter_taxa(ps16S_7,function(x) mean (x)>0, TRUE)
+```
+
+**Before filtering**   
+gyrB :  4842 taxa and 1419 samples 
+16S : 2643 taxa and 1471 samples
+
+## 4.3 - Phylogenetic tree 
+Neighbor-Joining tree were constructed the packages DECIPHER v 2.12.0 and Phangorn v 2.5.5 using default paramaters.
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+library("DECIPHER"); packageVersion("DECIPHER")
+seqs.16S.nf <- refseq(ps16S_6)
+alignment.16S.nf <- AlignSeqs(DNAStringSet(seqs.16S.nf), anchor=NA)
+library("phangorn") ; packageVersion("phangorn")
+phang.align.16S.nf <- phyDat(as(alignment.16S.nf, "matrix"), type="DNA")
+mt.16S.nf <- modelTest(phang.align.16S.nf) # here we choose GTR + G + I
+dm.16S.nf <- dist.ml(phang.align.16S.nf)
+treeNJ.16S.nf <- NJ(dm.16S.nf) # Note, tip order != sequence order
+fit.16S.nf <- pml(treeNJ.16S.nf, data=phang.align.16S.nf)
+fit.GTR.16S.nf <- update(fit.16S.nf, k=4, inv=0.2)
+fit.GTR.16S.nf <- optim.pml(fit.GTR.16S.nf, model ="GTR", optInv=TRUE, optGamma=TRUE, rearrangement = "stochastic", control = pml.control(trace = 0))
+d16S.nf <- phyloseq(tax_table(ps16S_6), sample_data(ps16S_6),
+                 otu_table(ps16S_6, taxa_are_rows = FALSE), refseq(ps16S_6), phy_tree(fit.GTR.16S.nf$tree))
+saveRDS(d16S.nf, "16S.nf_PS.rds")
+
+seqs.gyrB.nf <- refseq(psgyrB_6)
+alignment.gyrB.nf <- AlignTranslation(seqs.gyrB.nf, sense = "+", readingFrame = 2, type ="DNAStringSet") 
+BrowseSeqs(alignment.gyrB.nf, highlight=0)
+phang.align.gyrB.nf <- phyDat(as(alignment.gyrB.nf, "matrix"), type="DNA")
+dm.gyrB.nf <- dist.ml(phang.align.gyrB.nf)
+treeNJ.gyrB.nf <- NJ(dm.gyrB.nf) # Note, tip order != sequence order
+fit.gyrB.nf <- pml(treeNJ.gyrB.nf, data=phang.align.gyrB.nf)
+fit.GTR.gyrB.nf <- update(fit.gyrB.nf, k=4, inv=0.2)
+fit.GTR.gyrB.nf <- optim.pml(fit.GTR.gyrB.nf, model ="GTR", optInv=TRUE, optGamma=TRUE, rearrangement = "stochastic", control = pml.control(trace = 0))
+dgyrB.nf <- phyloseq(tax_table(psgyrB_6), sample_data(psgyrB_6),
+                 otu_table(psgyrB_6, taxa_are_rows = FALSE), refseq(psgyrB_6), phy_tree(fit.GTR.gyrB.nf$tree))
+saveRDS(dgyrB.nf, "gyrB.nf_PS.rds") 
+```
+
+**After filtering**  
+
+* 2738 taxa and 1424 samples
+
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+library("DECIPHER"); packageVersion("DECIPHER")
+seqs.16S <- refseq(ps16S_8)
+alignment.16S <- AlignSeqs(DNAStringSet(seqs.16S), anchor=NA)
+library("phangorn") ; packageVersion("phangorn")
+phang.align.16S <- phyDat(as(alignment.16S, "matrix"), type="DNA")
+mt.16S <- modelTest(phang.align.16S) # here we choose GTR + G + I
+dm.16S <- dist.ml(phang.align.16S)
+treeNJ.16S <- NJ(dm.16S) # Note, tip order != sequence order
+fit.16S <- pml(treeNJ.16S, data=phang.align.16S)
+fit.GTR.16S <- update(fit.16S, k=4, inv=0.2)
+fit.GTR.16S <- optim.pml(fit.GTR.16S, model ="GTR", optInv=TRUE, optGamma=TRUE, rearrangement = "stochastic", control = pml.control(trace = 0))
+d16S <- phyloseq(tax_table(ps16S_8), sample_data(ps16S_8),
+                 otu_table(ps16S_8, taxa_are_rows = FALSE), refseq(ps16S_8), phy_tree(fit.GTR.16S$tree))
+saveRDS(d16S, "~/Documents/F2S/Year4/16S_PS.rds")
+
+seqs.gyrB <- refseq(psgyrB_8)
+alignment.gyrB <- AlignTranslation(seqs.gyrB, sense = "+", readingFrame = 2, type ="DNAStringSet") 
+BrowseSeqs(alignment.gyrB, highlight=0)
+phang.align.gyrB <- phyDat(as(alignment.gyrB, "matrix"), type="DNA")
+dm.gyrB <- dist.ml(phang.align.gyrB)
+treeNJ.gyrB <- NJ(dm.gyrB) # Note, tip order != sequence order
+fit.gyrB <- pml(treeNJ.gyrB, data=phang.align.gyrB)
+fit.GTR.gyrB <- update(fit.gyrB, k=4, inv=0.2)
+fit.GTR.gyrB <- optim.pml(fit.GTR.gyrB, model ="GTR", optInv=TRUE, optGamma=TRUE, rearrangement = "stochastic", control = pml.control(trace = 0))
+dgyrB <- phyloseq(tax_table(psgyrB_8), sample_data(psgyrB_8),
+                 otu_table(psgyrB_8, taxa_are_rows = FALSE), refseq(psgyrB_8), phy_tree(fit.GTR.gyrB$tree))
+saveRDS(dgyrB, "~/Documents/F2S/Year4/gyrB_PS.rds") 
+```
+
+**Save merged PS objects with phylogenetic tree**  
+
+## 4.4 - Remove contaminants with decontam
+
+Unfiltered
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+library(phyloseq)
+library(ggplot2)
+library(decontam); packageVersion("decontam")
+
+dgyrB <- readRDS("gyrB.nf_PS.rds") # 4815 taxa and 1398 samples
+d16S <- readRDS("16S.nf_PS.rds") # 2738 taxa and 1424 samples
+
+df <- as.data.frame(sample_data(d16S))
+df$LibrarySize <- sample_sums(d16S)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=LibrarySize, color=Sample_or_Control)) + geom_point()
+sample_data(d16S)$is.neg <- sample_data(d16S)$Sample_or_Control == "Negative"
+contamdf.prev <- isContaminant(d16S, method="prevalence", neg="is.neg", threshold=0.001)
+table(contamdf.prev$contaminant)
+head(which(contamdf.prev$contaminant))
+# Make phyloseq object of presence-absence in negative controls and true samples
+ps.pa <- transform_sample_counts(d16S, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "Negative", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "Sample", ps.pa)
+# Make data.frame of prevalence in positive and negative samples
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prev$contaminant)
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) + geom_point() +
+  xlab("Prevalence (Negative Controls)") + ylab("Prevalence (True Samples)")
+d16S.noncontam <- prune_taxa(!contamdf.prev$contaminant, d16S)
+
+df <- as.data.frame(sample_data(dgyrB))
+df$LibrarySize <- sample_sums(dgyrB)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=LibrarySize, color=Sample_or_Control)) + geom_point()
+sample_data(dgyrB)$is.neg <- sample_data(dgyrB)$Sample_or_Control == "Negative"
+contamdf.prev <- isContaminant(dgyrB, method="prevalence", neg="is.neg", threshold=0.001)
+table(contamdf.prev$contaminant)
+head(which(contamdf.prev$contaminant))
+
+#Remove positive and negative controls
+dgyrBc <- subset_samples(dgyrB, Sample_or_Control =="Sample")
+dgyrBc1 <- prune_samples(sample_sums(dgyrBc)>=1000, dgyrBc)
+dgyrBc2 <- filter_taxa(dgyrBc1,function(x) sum (x)>0, TRUE)
+
+d16Sc <- subset_samples(d16S.noncontam, Sample_or_Control =="Sample")
+d16Sc1 <- prune_samples(sample_sums(d16Sc)>=1000, d16Sc)
+d16Sc2 <- filter_taxa(d16Sc1,function(x) sum (x)>0, TRUE)
+
+#Save clean PS objects
+saveRDS(dgyrBc2, "gyrB.nf_PS_clean.rds")
+saveRDS(d16Sc2, "16S.nf_PS_clean.rds")
+```
+
+Filtered
+
+```{r, echo=FALSE, results='hide', eval = FALSE}
+dgyrB <- readRDS("gyrB_PS.rds") # #4815 taxa and 1398 samples
+d16S <- readRDS("16S_PS.rds") # #2738 taxa and 1424 samples
+
+
+df <- as.data.frame(sample_data(d16S))
+df$LibrarySize <- sample_sums(d16S)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=LibrarySize, color=Sample_or_Control)) + geom_point()
+sample_data(d16S)$is.neg <- sample_data(d16S)$Sample_or_Control == "Negative"
+contamdf.prev <- isContaminant(d16S, method="prevalence", neg="is.neg", threshold=0.001)
+table(contamdf.prev$contaminant)
+head(which(contamdf.prev$contaminant))
+# Make phyloseq object of presence-absence in negative controls and true samples
+ps.pa <- transform_sample_counts(d16S, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "Negative", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "Sample", ps.pa)
+# Make data.frame of prevalence in positive and negative samples
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prev$contaminant)
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) + geom_point() +
+  xlab("Prevalence (Negative Controls)") + ylab("Prevalence (True Samples)")
+d16S.noncontam <- prune_taxa(!contamdf.prev$contaminant, d16S)
+
+df <- as.data.frame(sample_data(dgyrB))
+df$LibrarySize <- sample_sums(dgyrB)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=LibrarySize, color=Sample_or_Control)) + geom_point()
+sample_data(dgyrB)$is.neg <- sample_data(dgyrB)$Sample_or_Control == "Negative"
+contamdf.prev <- isContaminant(dgyrB, method="prevalence", neg="is.neg", threshold=0.001)
+table(contamdf.prev$contaminant)
+head(which(contamdf.prev$contaminant))
+
+#Remove positive and negative controls
+dgyrBc <- subset_samples(dgyrB, Sample_or_Control =="Sample")
+dgyrBc1 <- prune_samples(sample_sums(dgyrBc)>=1000, dgyrBc)
+dgyrBc2 <- filter_taxa(dgyrBc1,function(x) sum (x)>0, TRUE)
+
+d16Sc <- subset_samples(d16S.noncontam, Sample_or_Control =="Sample")
+d16Sc1 <- prune_samples(sample_sums(d16Sc)>=1000, d16Sc)
+d16Sc2 <- filter_taxa(d16Sc1,function(x) sum (x)>0, TRUE)
+
+#Save clean PS objects
+saveRDS(dgyrBc2, "gyrB_PS_dataset2_3.rds")
+saveRDS(d16Sc2, "16S_PS_dataset2_3.rds")
+```
+
+*After decontamination with decontam (R package)*
+The decontam package provides simple statistical methods to identify and visualize contaminating DNA features, allowing them to be removed and a more accurate picture of sampled communities to be constructed from marker-gene and metagenomics data.
+
+We used the "prevalence" method. In this method, the prevalence (presence/absence across samples) of each sequence feature in true positive samples is compared to the prevalence in negative controls to identify contaminants.
+
+**Save merged PS objects with phylogenetic tree**    
+
+*gyrB:*      
+
+phyloseq-class experiment-level object    
+otu_table()   OTU Table:         [ 4815 taxa and 1398 samples ]    
+sample_data() Sample Data:       [ 1398 samples by 18 sample variables ]    
+tax_table()   Taxonomy Table:    [ 4815 taxa by 7 taxonomic ranks ]    
+phy_tree()    Phylogenetic Tree: [ 4815 tips and 4813 internal nodes ]    
+refseq()      DNAStringSet:      [ 4815 reference sequences ]    
+
+*16S :*     
+
+phyloseq-class experiment-level object   
+otu_table()   OTU Table:         [ 2738 taxa and 1424 samples ]    
+sample_data() Sample Data:       [ 1424 samples by 18 sample variables ]    
+tax_table()   Taxonomy Table:    [ 2738 taxa by 6 taxonomic ranks ]    
+phy_tree()    Phylogenetic Tree: [ 2738 tips and 2737 internal nodes ]     
+refseq()      DNAStringSet:      [ 2738 reference sequences ]     
+
+
+
+*****
+# 5 - Dataset 2
+
+```{r, echo=FALSE, message=FALSE}
+library(phyloseq); packageVersion("phyloseq")
+d16S <- readRDS("16S_PS_dataset2_3.rds") #2738 taxa and 1424 samples
+dgyrB <- readRDS("gyrB_PS_dataset2_3.rds") #4815 taxa and 1398 samples
+
+#Select second dataset
+d16S.exp1 <- subset_samples(d16S, Experiment == "Exp1") 
+d16S.exp1  <- filter_taxa(d16S.exp1,function(x) sum (x)>0, TRUE) #2267 taxa and 1082 samples 
+dgyrB.exp1 <- subset_samples(dgyrB, Experiment == "Exp1") 
+dgyrB.exp1  <- filter_taxa(dgyrB.exp1,function(x) sum (x)>0, TRUE) #4133 taxa and 1063 samples
+#Select seed only
+d16S.exp1.seed <- subset_samples(d16S.exp1, Habitat =="Seed")
+d16S.exp1.seed  <- filter_taxa(d16S.exp1.seed,function(x) sum (x)>0, TRUE) #1644 taxa and 978 samples
+dgyrB.exp1.seed <- subset_samples(dgyrB.exp1, Habitat =="Seed")
+dgyrB.exp1.seed  <- filter_taxa(dgyrB.exp1.seed,function(x) sum (x)>0, TRUE) #2524 taxa and 956 samples
+
+
+dgyrB.exp1.seed.b <- subset_samples(dgyrB.exp1.seed, Plant.species %in% c("Bean"))
+dgyrB.exp1.seed.r <- subset_samples(dgyrB.exp1.seed, Plant.species %in% c("Radish"))
+d16S.exp1.seed.b <- subset_samples(d16S.exp1.seed, Plant.species %in% c("Bean"))
+d16S.exp1.seed.r <- subset_samples(d16S.exp1.seed, Plant.species %in% c("Radish"))
+```
+
+*d16S :*   
+*dgyrB:*    
+
+To found out which samples are in this dataset please refer to Data information section.
+
+## 5.1 - Sequencing depth
+
+We first assess the number of sequences per sample
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Assess sequencing depth
+library(data.table)
+sdt16S <- data.table(as(sample_data(d16S.exp1.seed), "data.frame"),
+                     TotalReads = sample_sums(d16S.exp1.seed), keep.rownames = TRUE)
+sdtgyrB <- data.table(as(sample_data(dgyrB.exp1.seed), "data.frame"),
+                     TotalReads = sample_sums(dgyrB.exp1.seed), keep.rownames = TRUE)
+```
+
+We next performed rarefaction curves
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library("vegan")
+library(ggplot2)
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Markdown/Dossier_run_script_vf/Rscripts/richness.R")
+
+sample_data(d16S.exp1.seed)$Experiment <- c("Exp2")
+sample_data(dgyrB.exp1.seed)$Experiment <- c("Exp2")
+
+
+rcurve16S <- ggrare(d16S.exp1.seed, 
+                    step = 100, 
+                    color = "DAP",
+                    se = FALSE)  + labs (title = "16S rRNA gene") + geom_vline(xintercept=4000)
+
+rcurve16Sf <- rcurve16S + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Species richness") + xlab ("Sample size") + ggtitle("16S rRNA gene") + facet_grid(~Experiment, scale = "free")
+rcurve16Sf
+
+rcurvegyrB <- ggrare(dgyrB.exp1.seed, 
+                    step = 100, 
+                    color = "DAP",
+                    se = FALSE)  + labs (title = "gyrB") + geom_vline(xintercept=4000)
+
+
+rcurvegyrBf <- rcurvegyrB + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Species richness") + xlab ("Sample size") + ggtitle("gyrB") + facet_grid(~Experiment, scale = "free")
+rcurvegyrBf
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+rcurve16Sf
+rcurvegyrBf
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Prepare palette color for habitats
+
+  name_DAP <- c("D02", "D27", "D33", "D42", "D50", "D03", "D26", "D37", "D65")
+  
+  # desired color palette
+  DAPPalette <- c("#FAFFEC", "#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B","#FFF2F1", "#F6E3CE", "#FAAC58", "#DF3A01")
+  
+  # associated EnvType level
+  names(DAPPalette) <- name_DAP
+```
+
+
+## 5.2 - Alpha diversity analysis
+In this part we used rarefy data :    
+
+* **16S** : 4,000 reads per sample        
+* **gyrB** : 4,000 reads per sample      
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results="hide"}
+#Rarefy datasets
+r16S <- rarefy_even_depth(d16S.exp1.seed, sample.size = 4000, rngseed = 700) 
+rgyrB <- rarefy_even_depth(dgyrB.exp1.seed, sample.size = 4000, rngseed = 800)
+#Table of alpha-diversity estimators
+table_r16S <- estimate_richness(r16S, split = TRUE, measures=c("Observed", "InvSimpson","Shannon"))
+table_rgyrB <- estimate_richness(rgyrB, split = TRUE, measures=c("Observed", "InvSimpson","Shannon"))
+#Bind design + table of alpha_div
+sdr16S <- sample_data(r16S)
+sdrgyrB <- sample_data(rgyrB)
+datar16S <- cbind(sample_data(sdr16S), table_r16S) 
+datargyrB <- cbind(sample_data(sdrgyrB), table_rgyrB) 
+#Subset datasets
+datar16S_b <- subset(datar16S, Plant.species %in% c("Bean"))
+datar16S_r <- subset(datar16S, Plant.species %in% c("Radish"))
+datargyrB_b <- subset(datargyrB, Plant.species %in% c("Bean"))
+datargyrB_r <- subset(datargyrB, Plant.species %in% c("Radish"))
+
+datar16S_b50 <- subset(datar16S_b, DAP %in% c("D50"))
+summary(datar16S_b50)
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#GLM on richness 
+library(lme4)
+library(MASS)
+library(car)
+library(emmeans)
+
+#16S bean
+ric.bean.16S <- glm.nb(Observed ~ DAP, data = datar16S_b)
+ric.bean.16S.plant <- glm.nb(Observed ~ DAP * Plant , data = datar16S_b)
+summary(ric.bean.16S)
+summary(ric.bean.16S.plant)
+1- pchisq(summary(ric.bean.16S)$deviance,
+          summary(ric.bean.16S)$df.residual)
+1- pchisq(summary(ric.bean.16S.plant)$deviance,
+          summary(ric.bean.16S.plant)$df.residual)
+
+emm.bean.ric.dap.16S <- emmeans(ric.bean.16S, ~ DAP)
+stat_bean_16S <- multcomp::cld(emm.bean.ric.dap.16S, alpha = 0.01, Letters=letters)
+
+emm.bean.ric.plant.16S.plant <- emmeans(ric.bean.16S.plant, ~ Plant | DAP)
+stat_bean_16S.plant <- multcomp::cld(emm.bean.ric.plant.16S.plant, alpha = 0.01, Letters=letters)
+
+#Manage data frame for DAP stats
+DAP_stats_bean_16S <- data.frame(group = c(stat_bean_16S$.group), DAP = c("D33", "D27", "D42", "D50"))
+library(tidyr)
+DAP_stats_bean_16S_f <- unite(DAP_stats_bean_16S, stats, c("DAP", "group"), sep = "")
+DAP_stats_bean_16S_f2 <- DAP_stats_bean_16S_f$stats
+names(DAP_stats_bean_16S_f2) <- c("D33", "D27", "D42", "D50")
+
+#gyrB bean
+ric.bean.gyrB <- glm.nb(Observed ~ DAP , data = datargyrB_b)
+ric.bean.gyrB.plant <- glm.nb(Observed ~ DAP * Plant , data = datargyrB_b)
+summary(ric.bean.gyrB)
+summary(ric.bean.gyrB.plant)
+
+1- pchisq(summary(ric.bean.gyrB)$deviance,
+          summary(ric.bean.gyrB)$df.residual)
+1- pchisq(summary(ric.bean.gyrB.plant)$deviance,
+          summary(ric.bean.gyrB.plant)$df.residual)
+Anova(ric.bean.gyrB) 
+Anova(ric.bean.gyrB.plant) 
+emm.bean.ric.dap.gyrB <- emmeans(ric.bean.gyrB, ~ DAP)
+stat_bean_gyrB <- multcomp::cld(emm.bean.ric.dap.gyrB, alpha = 0.01, Letters=letters)
+emm.bean.ric.plant.gyrB <- emmeans(ric.bean.gyrB.plant, ~ Plant | DAP)
+stat_bean_gyrB_plant <- multcomp::cld(emm.bean.ric.plant.gyrB, alpha = 0.01, Letters=letters) 
+
+#Manage data frame for DAP stats
+DAP_stats_bean_gyrB <- data.frame(group = c(stat_bean_gyrB$.group), DAP = c("D27", "D33", "D42", "D50"))
+library(tidyr)
+DAP_stats_bean_gyrB_f <- unite(DAP_stats_bean_gyrB, stats, c("DAP", "group"), sep = "")
+DAP_stats_bean_gyrB_f2 <- DAP_stats_bean_gyrB_f$stats
+names(DAP_stats_bean_gyrB_f2) <- c("D27", "D33", "D42", "D50")
+
+#16S radish
+ric.rad.16S <- glm.nb(Observed ~ DAP, data = datar16S_r)
+ric.rad.16S.plant <- glm.nb(Observed ~ DAP * Plant, data = datar16S_r)
+
+summary(ric.rad.16S)
+summary(ric.rad.16S.plant)
+1- pchisq(summary(ric.rad.16S)$deviance,
+          summary(ric.rad.16S)$df.residual) 
+1- pchisq(summary(ric.rad.16S.plant)$deviance,
+          summary(ric.rad.16S.plant)$df.residual)
+Anova(ric.rad.16S) 
+Anova(ric.rad.16S.plant) 
+emm.rad.ric.dap.16S <- emmeans(ric.rad.16S, ~ DAP)
+stat_rad_16S <- multcomp::cld(emm.rad.ric.dap.16S, alpha = 0.01, Letters=letters)
+emm.rad.ric.plant.16S <- emmeans(ric.rad.16S.plant, ~ Plant | DAP)
+stat_rad_16S_plant <- multcomp::cld(emm.rad.ric.plant.16S, alpha = 0.01, Letters=letters)
+
+#Manage data frame for DAP stats
+DAP_stats_rad_16S <- data.frame(group = c(stat_rad_16S$.group), DAP = c("D26", "D37", "D65"))
+library(tidyr)
+DAP_stats_rad_16S_f <- unite(DAP_stats_rad_16S, stats, c("DAP", "group"), sep = "")
+DAP_stats_rad_16S_f2 <- DAP_stats_rad_16S_f$stats
+names(DAP_stats_rad_16S_f2) <- c("D26", "D37", "D65")
+
+#gyrB radish
+ric.rad.gyrB <- glm.nb(Observed ~ DAP, data = datargyrB_r)
+ric.rad.gyrB.plant <- glm.nb(Observed ~ DAP * Plant, data = datargyrB_r)
+
+summary(ric.rad.gyrB)
+summary(ric.rad.gyrB.plant)
+1- pchisq(summary(ric.rad.gyrB)$deviance,
+          summary(ric.rad.gyrB)$df.residual) 
+1- pchisq(summary(ric.rad.gyrB.plant)$deviance,
+          summary(ric.rad.gyrB.plant)$df.residual)
+Anova(ric.rad.gyrB) 
+Anova(ric.rad.gyrB.plant) 
+emm.rad.ric.dap.gyrB <- emmeans(ric.rad.gyrB, ~ DAP)
+stat_rad_gyrB <- multcomp::cld(emm.rad.ric.dap.gyrB, alpha = 0.01, Letters=letters)
+emm.rad.ric.plant.gyrB <- emmeans(ric.rad.gyrB.plant, ~ Plant | DAP)
+stat_rad_gyrB_plant <- multcomp::cld(emm.rad.ric.plant.gyrB, alpha = 0.01, Letters=letters)
+
+#Manage data frame for DAP stats
+DAP_stats_rad_gyrB <- data.frame(group = c(stat_rad_gyrB$.group), DAP = c("D26", "D37", "D65"))
+library(tidyr)
+DAP_stats_rad_gyrB_f <- unite(DAP_stats_rad_gyrB, stats, c("DAP", "group"), sep = "")
+DAP_stats_rad_gyrB_f2 <- DAP_stats_rad_gyrB_f$stats
+names(DAP_stats_rad_gyrB_f2) <- c("D26", "D37", "D65")
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, results="hide"}
+#Bean
+library(ggplot2)
+datar16S_b$DAP <- factor(datar16S_b$DAP, 
+                         levels = c("D27", "D33" , "D42", "D50"))
+
+Plot_16S_Observed_b <- ggplot(data=datar16S_b, 
+                             aes_string(x='Plant',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = TRUE) + 
+  scale_fill_manual(values=c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  scale_colour_manual(values=c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+  ylab ("Observed ASV richness") + xlab ("Plant individual") +
+  facet_grid(cols = vars(DAP), scales = "free", labeller = labeller(DAP = DAP_stats_bean_16S_f2)) +
+  ggtitle("Bean - 16S")
+  
+
+Plot_gyrB_Observed_b <- ggplot(data=datargyrB_b, 
+                             aes_string(x='Plant',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = TRUE) + 
+  scale_fill_manual(values=c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  scale_colour_manual(values=c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") + xlab ("Plant individual") + 
+  facet_grid(cols = vars(DAP), scales = "free", labeller = labeller(DAP = DAP_stats_bean_gyrB_f2)) +
+  ggtitle("Bean - gyrB")
+
+#Radish
+datar16S_r$DAP <- factor(datar16S_r$DAP, 
+                         levels = c("D26", "D37", "D65"))
+
+Plot_16S_Observed_r <- ggplot(data=datar16S_r, 
+                            aes_string(x='Plant',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = TRUE) + 
+  scale_fill_manual(values=c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  scale_colour_manual(values=c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") + xlab ("Plant individual") + 
+  facet_grid(cols = vars(DAP), scales = "free", labeller = labeller(DAP = DAP_stats_rad_16S_f2)) +
+  ggtitle("Radish - 16S")
+
+Plot_gyrB_Observed_r <- ggplot(data=datargyrB_r, 
+                            aes_string(x='Plant',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = TRUE) + 
+  scale_fill_manual(values=c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  scale_colour_manual(values=c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  theme(legend.position="none",
+        strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Observed ASV richness") + xlab ("Plant individual") + 
+  facet_grid(cols = vars(DAP), scales = "free", labeller = labeller(DAP = DAP_stats_rad_gyrB_f2)) +
+  ggtitle("Radish - gyrB")
+```
+
+
+***Figure alpha diversity***
+
+```{r, echo=FALSE, message=FALSE}
+theme_set(theme_bw())
+library(gridExtra)
+plots_observed <- grid.arrange(
+  Plot_16S_Observed_b,
+  Plot_16S_Observed_r,
+  Plot_gyrB_Observed_b,
+  Plot_gyrB_Observed_r,
+  ncol=2,
+  nrow=2)
+```
+
+
+## 5.3 - Correlation CFU/Richness
+
+we performed correlation between number of CFU per seed and richness.     
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(tidyr)
+library(dplyr)
+
+#Prepare data CFU percent
+seed <- read.csv("Microbiology/CFU_seed.csv", sep = ";",  check.names=FALSE, row.names=1)
+seed.bean <- subset(seed, Species=='Bean')
+seed.rad <- subset(seed, Species=='Radish')
+
+#Bean
+seed.bean2 <- seed.bean %>% 
+ group_by(DAP, Contamination) %>% 
+ summarise(sum_percent = as.numeric(table(Contamination)))
+
+seed.bean3 <- seed.bean2 %>% spread( Contamination, sum_percent)
+
+row.names(seed.bean3) <- seed.bean3$DAP
+seed.bean3$DAP <- NULL
+seed.bean3[is.na(seed.bean3)] <- 0
+
+seed.bean3_percent <- seed.bean3 / rowSums(seed.bean3) * 100
+seed.bean3_percent
+ 
+#Radish
+seed.rad2 <- seed.rad %>% 
+ group_by(DAP, Contamination) %>% 
+ summarise(sum_percent = as.numeric(table(Contamination)))
+ 
+seed.rad3 <- seed.rad2 %>% spread( Contamination, sum_percent)
+
+row.names(seed.rad3) <- seed.rad3$DAP
+seed.rad3$DAP <- NULL
+seed.rad3[is.na(seed.rad3)] <- 0
+
+seed.rad3_percent <- seed.rad3 / rowSums(seed.rad3) * 100
+seed.rad3_percent
+
+
+#Richness
+
+#Bean
+bean_obs <- datargyrB_b %>% 
+ group_by(DAP) %>% 
+ summarise(sum_observed = mean(Observed))
+
+#Radish
+rad_obs <- datargyrB_r %>% 
+ group_by(DAP) %>% 
+ summarise(sum_observed = mean(Observed))
+
+#Combine CFU + richness
+seed.bean3_percent
+bean_obs
+bean_cor_f <- cbind(bean_obs, seed.bean3_percent)
+bean_cor_f$"0" <- NULL
+colnames(bean_cor_f)[3] <- c("Percent_cont")
+
+seed.rad3_percent
+rad_obs
+rad_cor_f <- cbind(rad_obs, seed.rad3_percent)
+rad_cor_f$"0" <- NULL
+colnames(rad_cor_f)[3] <- c("Percent_cont")
+
+#Plot
+p1<-ggplot(data=bean_cor_f, aes_string(x='sum_observed',y='Percent_cont')) + 
+  geom_point() + 
+  geom_smooth(method='lm',formula=y~x) +
+  ggtitle("Bean - gyrB") + ylim(0,100)
+p1
+
+p2<-ggplot(data=rad_cor_f, aes_string(x='sum_observed',y='Percent_cont')) + 
+  geom_point() + 
+  geom_smooth(method='lm',formula=y~x) +
+  ggtitle("Radish - gyrB")+ ylim(0,100)
+p2
+
+#Calculate coefficient of determination
+cor.bean <- lm(sum_observed ~ Percent_cont, data=bean_cor_f) 
+summary(cor.bean)
+
+cor.rad <- lm(sum_observed ~ Percent_cont, data=rad_cor_f) 
+summary(cor.rad)
+```
+```{r, echo=FALSE, message=FALSE}
+p1
+p2
+```
+
+
+## 5.4 - Taxonomic composition
+
+Evaluation of the taxonomic composition at the individual seed level.     
+
+```{r, echo=FALSE, message=FALSE}
+library(ggplot2)
+#Compute prevalence of each feature, store as data.frame
+prevdf16S <- apply(X = otu_table(d16S.exp1.seed),
+                   MARGIN = ifelse(taxa_are_rows(d16S.exp1.seed), yes = 1, no = 2),
+                   FUN = function(x){sum(x > 0)})
+prevdfgyrB <- apply(X = otu_table(dgyrB.exp1.seed),
+                   MARGIN = ifelse(taxa_are_rows(dgyrB.exp1.seed), yes = 1, no = 2),
+                   FUN = function(x){sum(x > 0)})
+#Add taxonomy and total read counts to this data.frame
+prevdf16S <- data.frame(Prevalence = prevdf16S, # Issue here with species name NA
+                        TotalAbundance = taxa_sums(d16S.exp1.seed),
+                        tax_table(d16S.exp1.seed))
+prevdfgyrB <- data.frame(Prevalence = prevdfgyrB,
+                        TotalAbundance = taxa_sums(dgyrB.exp1.seed),
+                        tax_table(dgyrB.exp1.seed))
+#Taxa prevalence vs total count
+plot16S <- ggplot(prevdf16S, aes(TotalAbundance, Prevalence / nsamples(d16S.exp1.seed),color=Phylum)) +
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) + geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+plotgyrB <- ggplot(prevdfgyrB, aes(TotalAbundance, Prevalence / nsamples(dgyrB.exp1.seed),color=Phylum)) +
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) + geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(reshape2); packageVersion("reshape2")
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/graphical_methods.R")
+#Palette taxo
+name_taxo_gyrB <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Burkholderiales", "Enterobacterales", "NA", "Pseudomonadales", "Xanthomonadales", "Unknown", "Other")
+name_taxo_16S <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Betaproteobacteriales", "Enterobacteriales", "NA", "Pseudomonadales", "Xanthomonadales", "Flavobacteriales", "Unknown", "Other")
+#Desired color palette
+OrderPalette_gyrB <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0","#000000", "#8F8E8E")
+OrderPalette_16S <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0", "#FE9A5C" , "#000000", "#8F8E8E")
+#Associated name and color
+names(OrderPalette_gyrB) <- name_taxo_gyrB
+names(OrderPalette_16S) <- name_taxo_16S
+
+#Split
+d16S.exp1.seed.b <- subset_samples(d16S.exp1.seed, Plant.species %in% c("Bean"))
+d16S.exp1.seed.b <- subset_samples(d16S.exp1.seed, Plant.species %in% c("Bean"))
+d16S.exp1.seed.r <- subset_samples(d16S.exp1.seed, Plant.species %in% c("Radish"))
+
+dgyrB.exp1.seed.b <- subset_samples(dgyrB.exp1.seed, Plant.species %in% c("Bean"))
+dgyrB.exp1.seed.r <- subset_samples(dgyrB.exp1.seed, Plant.species %in% c("Radish"))
+
+#Plot
+tax16S.b.dy <- plot_composition(d16S.exp1.seed.b, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~DAP, scales="free_x", nrow=1) +
+theme( legend.position = "bottom",
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+  axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+  ylab ("Relative abundance (%)") + 
+  ggtitle("Bean - 16S") +
+  xlab("Seeds") + 
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+tax16S.r.dy <- plot_composition(d16S.exp1.seed.r, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~DAP, scales="free_x", nrow=1) +
+theme( legend.position = "bottom",
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+  axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance (%)") + 
+  ggtitle("Radish - 16S") +
+    xlab("Seeds") + 
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+taxgyrB.b.dy <- plot_composition(dgyrB.exp1.seed.b, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~DAP, scales="free_x", nrow=1) +
+theme( legend.position = "bottom",
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+  axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+ 
+    ylab ("Relative abundance (%)") + 
+  ggtitle("Bean - gyrB") +
+    xlab("Habitat") + 
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+taxgyrB.r.dy <- plot_composition(dgyrB.exp1.seed.r, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") + 
+  facet_wrap(~DAP, scales="free_x", nrow=1) +
+theme( legend.position = "bottom", 
+       strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+   axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance (%)") + 
+  ggtitle("Radish - gyrB") +
+    xlab("Habitat") + 
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+```{r, echo=FALSE, message=FALSE}
+tax16S.b.dy
+tax16S.r.dy
+taxgyrB.b.dy
+taxgyrB.r.dy
+```
+
+## 5.5  Permanova Stages / Plants
+
+Importance of stages of seed development and spatial heteorgenity (plant) on seed microbiota composition.
+
+```{r, echo=FALSE, message=FALSE, fig.show='hide'}
+
+#Tansform to even sampling depth
+Log.d16S.exp1.seed.b <- transform_sample_counts(d16S.exp1.seed.b, function(x) log(1 + x))
+Log.d16S.exp1.seed.r <- transform_sample_counts(d16S.exp1.seed.r, function(x) log(1 + x))
+
+library(vegan)
+
+#Bean
+#Permanova nested DAP/Plant
+wUF.16Sb <- phyloseq::distance(Log.d16S.exp1.seed.b, method = "wunifrac")
+mdat.16Sb <- as(sample_data(Log.d16S.exp1.seed.b), "data.frame")
+adonis.16Sb <- adonis2(wUF.16Sb ~ DAP /Plant,
+                                data = mdat.16Sb, perm = 999) 
+print(adonis.16Sb)
+
+#Permanova nested DAP/Plant
+wUF.16Sr <- phyloseq::distance(Log.d16S.exp1.seed.r, method = "wunifrac")
+mdat.16Sr <- as(sample_data(Log.d16S.exp1.seed.r), "data.frame")
+#adonis.16Sr <- adonis2(wUF.16Sr ~ DAP /Plant,
+  #                              data = mdat.16Sb, perm = 999) 
+#print(adonis.16Sr)
+```
+
+# 6 - Rank abundance
+
+## 6.1 - Measure rank abundance
+
+Measure abundance of rank 1, rank 2, rank 3... taxa for each individual seed at each stage of development.
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(BiodiversityR)
+#Transform into relative abundance
+d16S.rank <- transform_sample_counts(d16S.exp1.seed, function(x) x / sum(x) ) 
+dgyrB.rank <- transform_sample_counts(dgyrB.exp1.seed, function(x) x / sum(x) ) 
+#Extract OTU table
+d16S.otu <- data.frame(otu_table(d16S.rank))
+dgyrB.otu <- data.frame(otu_table(dgyrB.rank))
+#Extract design
+design.16S <- data.frame(sample_data(d16S.rank))
+design.16S <- cbind(Sample = rownames(design.16S), design.16S)
+row.names(design.16S) <- NULL 
+design.16S$Sample <- as.factor(design.16S$Sample)
+design.gyrB <- data.frame(sample_data(dgyrB.rank))
+design.gyrB <- cbind(Sample = rownames(design.gyrB), design.gyrB)
+row.names(design.gyrB) <- NULL 
+design.gyrB$Sample <- as.factor(design.gyrB$Sample)
+
+#Rank abundance
+rank.16S <- with(design.16S, sapply(levels(Sample), function(lev)
+  rankabundance(d16S.otu, design.16S, 'Sample', lev),USE.NAMES = TRUE))
+rank.gyrB <- with(design.gyrB, sapply(levels(Sample), function(lev)
+  rankabundance(dgyrB.otu, design.gyrB, 'Sample', lev),USE.NAMES = TRUE))
+
+#Create data frame
+library(data.table)
+df.rank.16S <- do.call("rbind", rank.16S)
+df.rank.16S <- data.frame(rn = row.names(df.rank.16S), df.rank.16S)
+sample.16S <- do.call(rbind.data.frame, rank.16S)
+setDT(sample.16S, keep.rownames = TRUE)[]
+df.rank.gyrB <- do.call("rbind", rank.gyrB)
+df.rank.gyrB <- data.frame(rn = row.names(df.rank.gyrB), df.rank.gyrB)
+sample.gyrB <- do.call(rbind.data.frame, rank.gyrB)
+setDT(sample.gyrB, keep.rownames = TRUE)[]
+#separate first colunm
+library(tidyverse)
+sample.16S.f <- sample.16S %>%separate(rn, c("Sample", "ASV"), ".A")
+df.rank.16S$Sample <- sample.16S.f$Sample
+sample.gyrB.f <- sample.gyrB %>%separate(rn, c("Sample", "ASV"), ".A")
+df.rank.gyrB$Sample <- sample.gyrB.f$Sample
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#add design
+df.rank.16S.f <- merge(df.rank.16S, design.16S, by = "Sample")
+df.rank.gyrB.f <- merge(df.rank.gyrB, design.gyrB, by = "Sample")
+
+#Subset by plant species
+df.rank.16S.bean <- subset(df.rank.16S.f, Plant.species =="Bean")
+df.rank.16S.rad <- subset(df.rank.16S.f, Plant.species =="Radish")
+df.rank.gyrB.bean <- subset(df.rank.gyrB.f, Plant.species =="Bean")
+df.rank.gyrB.rad <- subset(df.rank.gyrB.f, Plant.species =="Radish")
+
+df.rank.16S.bean$rank <- as.factor(df.rank.16S.bean$rank)
+
+plot.rank.16S.bean <-ggplot(df.rank.16S.bean, aes(x=rank, y=abundance, fill=DAP)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="YlGn") +
+  facet_grid (~DAP, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+  ylab ("Relative abundance (%)") +
+  xlab ("Rank abundance") +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+  ggtitle("Bean - 16S")
+
+df.rank.16S.rad$rank <- as.factor(df.rank.16S.rad$rank)
+
+plot.rank.16S.rad <-ggplot(df.rank.16S.rad, aes(x=rank, y=abundance, fill=DAP)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="OrRd") +
+  facet_grid (~DAP, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+    ylab ("Relative abundance (%)") +
+  xlab ("Rank abundance") +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  ggtitle("Radish - 16S")
+
+df.rank.gyrB.bean$rank <- as.factor(df.rank.gyrB.bean$rank)
+
+plot.rank.gyrB.bean <-ggplot(df.rank.gyrB.bean, aes(x=rank, y=abundance, fill=DAP)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="YlGn") +
+  facet_grid (~DAP, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+    ylab ("Relative abundance (%)") +
+  xlab ("Rank abundance") +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+  ggtitle ("Bean - gyrB")
+
+
+df.rank.gyrB.rad$rank <- as.factor(df.rank.gyrB.rad$rank)
+
+plot.rank.gyrB.rad <-ggplot(df.rank.gyrB.rad, aes(x=rank, y=abundance, fill=DAP)) +
+  geom_boxplot() + 
+  scale_fill_brewer(palette="OrRd") +
+  facet_grid (~DAP, scales = "free") +
+    scale_x_discrete(limits = c("1","2", "3", "4", "5", "6", "7", "8", "9","10")) +
+  theme_bw()+
+    ylab ("Relative abundance (%)") +
+  xlab ("Rank abundance") +
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+  ggtitle ("Radish - gyrB")
+```
+
+```{r, echo=FALSE, message=FALSE}
+plot.rank.16S.bean
+plot.rank.16S.rad
+plot.rank.gyrB.bean
+plot.rank.gyrB.rad
+```
+
+## 6.2 - Select first rank
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Keep only first rank
+df.rank1.16S <- df.rank.16S %>%
+  filter(rank==1) %>%
+  rename(ASV = rn) %>% 
+  select(ASV, Sample) 
+df.rank1.gyrB <- df.rank.gyrB %>%
+  filter(rank==1) %>%
+  rename(ASV = rn) %>% 
+  select(ASV, Sample)
+#Convert all character columns of dataframe to factor
+df.rank1.16S <- as.data.frame(unclass(df.rank1.16S))
+df.rank1.gyrB <- as.data.frame(unclass(df.rank1.gyrB))
+#Create a co-occurence matrix
+comat_16S <- matrix(nrow = length(unique(df.rank1.16S$ASV)),ncol = length(unique(df.rank1.16S$Sample)),dimnames = list(c(unique(df.rank1.16S$ASV)), c(unique(df.rank1.16S$Sample))))
+for(i in 1:length(unique(df.rank1.16S$Sample))){
+  for(j in 1:length(unique(df.rank1.16S$ASV))){
+    comat_16S[j,i] <- length(which(df.rank1.16S$ASV==unique(df.rank1.16S$ASV)[j] & df.rank1.16S$Sample==df.rank1.16S$Sample [i]))  }}
+
+comat_gyrB <- matrix(nrow = length(unique(df.rank1.gyrB$ASV)),ncol = length(unique(df.rank1.gyrB$Sample)),dimnames = list(c(unique(df.rank1.gyrB$ASV)), c(unique(df.rank1.gyrB$Sample))))
+for(i in 1:length(unique(df.rank1.gyrB$Sample))){
+  for(j in 1:length(unique(df.rank1.gyrB$ASV))){
+    comat_gyrB[j,i] <- length(which(df.rank1.gyrB$ASV==unique(df.rank1.gyrB$ASV)[j] & df.rank1.gyrB$Sample==df.rank1.gyrB$Sample [i]))  }}
+```
+
+## 6.3 - Create a phyloseq object
+
+New phyloseq object with rank1 taxa only.    
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+design.16S <- design.16S %>% 
+  unite(DAP_Plant, DAP, Plant, sep="_", remove=FALSE) %>%
+  select(Sample, Plant.species, DAP_Plant, DAP, Plant, Fruit, LogCFU_sample) %>%
+  column_to_rownames("Sample")
+
+design.gyrB <- design.gyrB %>% 
+  unite(DAP_Plant, DAP, Plant, sep="_", remove=FALSE) %>%
+  select(Sample, Plant.species, DAP_Plant, DAP, Plant, Fruit, LogCFU_sample) %>%
+    column_to_rownames("Sample")
+
+p.rank.16S <- phyloseq(sample_data(design.16S),
+                  tax_table(d16S.exp1.seed),
+                  refseq(d16S.exp1.seed),
+                  phy_tree(d16S.exp1.seed),
+                   otu_table(comat_16S, taxa_are_rows = TRUE)) # 94 taxa and 977 samples
+p.rank.16S <- filter_taxa(p.rank.16S,function(x) sum (x)>0, TRUE) #94 taxa and 977 samples
+
+p.rank.gyrB <- phyloseq(sample_data(design.gyrB),
+                  tax_table(dgyrB.exp1.seed),
+                  refseq(dgyrB.exp1.seed),
+                  phy_tree(dgyrB.exp1.seed),
+                   otu_table(comat_gyrB, taxa_are_rows = TRUE)) # 944 taxa and 956 samples
+p.rank.gyrB <- filter_taxa(p.rank.gyrB,function(x) sum (x)>0, TRUE) # 285 taxa and 956 samples
+
+#By Plant species
+p.rank.16S.b <- subset_samples(p.rank.16S, Plant.species =="Bean")
+p.rank.16S.b  <- filter_taxa(p.rank.16S.b,function(x) sum (x)>0, TRUE) #70 taxa and 535 samples
+p.rank.16S.r <- subset_samples(p.rank.16S, Plant.species =="Radish")
+p.rank.16S.r  <- filter_taxa(p.rank.16S.r,function(x) sum (x)>0, TRUE) #50 taxa and 442 samples
+p.rank.gyrB.b <- subset_samples(p.rank.gyrB, Plant.species =="Bean")
+p.rank.gyrB.b  <- filter_taxa(p.rank.gyrB.b,function(x) sum (x)>0, TRUE) #223 taxa and 524 samples
+p.rank.gyrB.r <- subset_samples(p.rank.gyrB, Plant.species =="Radish")
+p.rank.gyrB.r  <- filter_taxa(p.rank.gyrB.r,function(x) sum (x)>0, TRUE) #80 taxa and 432 samples
+
+#Merge by Plant
+mer.16S.b <- merge_samples(p.rank.16S.b, "DAP_Plant")
+mer.16S.r <- merge_samples(p.rank.16S.r, "DAP_Plant")
+mer.gyrB.b <- merge_samples(p.rank.gyrB.b, "DAP_Plant")
+mer.gyrB.r <- merge_samples(p.rank.gyrB.r, "DAP_Plant")
+#Fix continuous variable to discrete value
+df.b <- data.frame(sample_data(mer.16S.b))
+df.r <- data.frame(sample_data(mer.16S.r))
+df.r <- cbind(Sample = rownames(df.r), df.r)
+df.b2 <- df.b %>% 
+  select(DAP) %>%
+  rename(DAP_Plant=DAP) %>%
+  separate(DAP_Plant, c("DAP", "Plant"), "_", remove=FALSE)
+df.r2 <- df.r %>% 
+  select(Sample) %>%
+  rename(DAP_Plant=Sample) %>%
+  separate(DAP_Plant, c("DAP", "Plant"), "_", remove=FALSE)
+#Update PS object
+mer.16S.b <- phyloseq(sample_data(df.b2), tax_table(mer.16S.b), phy_tree(mer.16S.b),
+                   otu_table(mer.16S.b, taxa_are_rows = FALSE))
+mer.gyrB.b <- phyloseq(sample_data(df.b2), tax_table(mer.gyrB.b), phy_tree(mer.gyrB.b),
+                   otu_table(mer.gyrB.b, taxa_are_rows = FALSE))
+mer.16S.r <- phyloseq(sample_data(df.r2), tax_table(mer.16S.r), phy_tree(mer.16S.r),
+                   otu_table(mer.16S.r, taxa_are_rows = FALSE))
+mer.gyrB.r <- phyloseq(sample_data(df.r2), tax_table(mer.gyrB.r), phy_tree(mer.gyrB.r),
+                   otu_table(mer.gyrB.r, taxa_are_rows = FALSE))
+```
+
+## 6.4 - Taxonomic composition
+
+Here all seed communities are agglomerate at the individual plant level using only the 1st rank taxa.   
+
+```{r, echo=FALSE, message=FALSE}
+# Load required libraries and source
+library(reshape2); packageVersion("reshape2") # '1.4.3'
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/graphical_methods.R")
+
+#Palette taxo
+name_taxo_gyrB <- c("Flavobacteriales", "Aeromonadales", "Cellvibrionales", "Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Burkholderiales", "Enterobacterales", "NA", "Pseudomonadales", "Xanthomonadales", "Unknown", "Other")
+
+name_taxo_16S <- c("Actinomycetales", "Micrococcales", "Streptomycetales", "Cytophagales", "Bacillales", "Clostridiales", "Lactobacillales", "Firmicutes", "Caulobacterales", "Rhizobiales", "Rhodobacterales", "Rhodospirillales", "Sphingomonadales", "Betaproteobacteriales", "Enterobacteriales", "NA", "Pseudomonadales", "Xanthomonadales", "Flavobacteriales", "Unknown", "Other")
+
+# desired color palette
+OrderPalette_gyrB <- c( "#F0E448", "#F04848", "#7AB57E",  "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0","#000000", "#8F8E8E")
+
+OrderPalette_16S <- c( "#c6aa91", "#8d5524", "#e0ac69", "#65737e", "#009688", "#99d5cf", "#65c3ba" , "#000000", "#ff93ac" ,"#ff6289" ,"#fc3468" ,"#feeaef" ,"#ff084a" ,"#011f4b" ,"#005b96" ,"#000000" ,"#6497b1" ,"#b3cde0", "#FE9A5C" , "#000000", "#8F8E8E")
+
+# associated name and color
+names(OrderPalette_gyrB) <- name_taxo_gyrB
+names(OrderPalette_16S) <- name_taxo_16S
+
+
+sample_data(mer.16S.b)$DAP <- c("D27", "D27","D27","D27","D27","D27", "D33", "D33","D33","D33","D33","D33","D42", "D42","D42","D42","D42", "D50","D50","D50","D50","D50","D50","D50")
+
+sample_data(mer.gyrB.b)$DAP <- c("D27", "D27","D27","D27","D27","D27", "D33", "D33","D33","D33","D33","D33","D42", "D42","D42","D42","D42", "D50","D50","D50","D50","D50","D50","D50")
+
+p.tax.16S.b <- plot_composition(mer.16S.b, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") +
+  ggtitle ("Bean - 16S") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+p.tax.16S.r <- plot_composition(mer.16S.r, "Kingdom", "Bacteria", "Order", numberOfTaxa=8, fill="Order") +
+  ggtitle ("Radish - 16S") + 
+     theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+p.tax.gyrB.b <- plot_composition(mer.gyrB.b, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") +
+  ggtitle ("Bean - gyrB") + 
+     theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+p.tax.gyrB.r <- plot_composition(mer.gyrB.r, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") +
+  ggtitle ("Radish - gyrB") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+p.tax.16S.b
+p.tax.16S.r
+
+p.tax.gyrB.b
+p.tax.gyrB.r
+```
+
+## 6.5 - Richness
+```{r, echo=FALSE, message=FALSE}
+ric.16S.b <- estimate_richness(mer.16S.b, split = TRUE, measures=c("Observed"))
+datar16S.b <- cbind(sample_data(mer.16S.b), ric.16S.b) 
+p.ric.16S.b <- ggplot(data=datar16S.b, 
+                             aes_string(x='DAP',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = DAP)) +
+    ggtitle("A- Bean - 16S")+ 
+      theme(legend.position="bottom",strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"))+ 
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  scale_color_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B"))
+
+ric.16S.r <- estimate_richness(mer.16S.r, split = TRUE, measures=c("Observed"))
+datar16S.r <- cbind(sample_data(mer.16S.r), ric.16S.r) 
+p.ric.16S.r <- ggplot(data=datar16S.r, 
+                             aes_string(x='DAP',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = DAP)) +
+    ggtitle("B- Radish - 16S") + 
+      theme(legend.position="bottom",strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"))+ 
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  scale_color_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01"))
+
+ric.gyrB.b <- estimate_richness(mer.gyrB.b, split = TRUE, measures=c("Observed"))
+datargyrB.b <- cbind(sample_data(mer.gyrB.b), ric.gyrB.b) 
+p.ric.gyrB.b <- ggplot(data=datargyrB.b, 
+                             aes_string(x='DAP',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = DAP)) +
+    ggtitle("C- Bean - gyrB")+ 
+      theme(legend.position="bottom",strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"))+ 
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  scale_color_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B"))
+
+ric.gyrB.r <- estimate_richness(mer.gyrB.r, split = TRUE, measures=c("Observed"))
+datargyrB.r <- cbind(sample_data(mer.gyrB.r), ric.gyrB.r) 
+p.ric.gyrB.r <- ggplot(data=datargyrB.r, 
+                             aes_string(x='DAP',y='Observed', fill='DAP')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(colour = DAP)) +
+    ggtitle("D- Radish - gyrB") + 
+      theme(legend.position="bottom",strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"))+ 
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  scale_color_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01"))
+```
+
+```{r, echo=FALSE, message=FALSE}
+p.ric.16S.b
+p.ric.16S.r
+
+p.ric.gyrB.b
+p.ric.gyrB.r
+```
+
+## 6.6 - Phylogenetic diversity 
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(picante)
+PD.16S.bean <- as.data.frame.matrix(otu_table(mer.16S.b))
+Faith.16S.bean <- pd(samp = PD.16S.bean, tree = phy_tree(mer.16S.b), include.root = F) 
+d.faith.16S.bean <- merge(sample_data(mer.16S.b), Faith.16S.bean, by="row.names", all=TRUE) 
+d.faith.16S.bean$DAP <- as.factor(d.faith.16S.bean$DAP) 
+
+kruskal.test(PD ~ DAP, d.faith.16S.bean) # p-value = 0.0193
+library(FSA)
+library(rcompanion)
+PT <- dunnTest(PD ~ DAP, d.faith.16S.bean)
+PT2 <- PT$res
+Groupbean_PD_16S <- cldList(comparison = PT2$Comparison, 
+                       p.value    = PT2$P.adj,
+                       threshold  = 0.05) # Significative groups
+Groupbean_PD_16S$DAP <- c("D27", "D33", "D42", "D50")
+
+PD.16S.b <- ggplot(data=d.faith.16S.bean,
+                              aes_string(x='DAP',y='PD', fill='DAP')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = DAP)) +
+      ggtitle("Bean - 16S")+ 
+ theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  xlab ("Day after polination") + 
+  ylab ("Phylogenetic diversity") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  scale_color_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) + 
+    geom_text( data   = Groupbean_PD_16S, mapping = aes(x = DAP, y = 2.5, label = Letter), size = 6)
+
+PD.16S.rad <- as.data.frame.matrix(otu_table(mer.16S.r))
+Faith.16S.rad <- pd(samp = PD.16S.rad, tree = phy_tree(mer.16S.r), include.root = F) 
+d.faith.16S.rad <- merge(sample_data(mer.16S.r), Faith.16S.rad, by="row.names", all=TRUE) 
+d.faith.16S.rad$DAP <- as.factor(d.faith.16S.rad$DAP) 
+
+kruskal.test(PD ~ DAP, d.faith.16S.rad) # p-value = 0.08046
+PT <- dunnTest(PD ~ DAP, d.faith.16S.rad) # no significant differences
+PT2 <- PT$res
+
+PD.16S.r <- ggplot(data=d.faith.16S.rad,
+                              aes_string(x='DAP',y='PD', fill='DAP')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = DAP)) +
+      ggtitle("Radish - 16S") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Day after polination") + 
+  ylab ("Phylogenetic diversity") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  scale_color_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01"))
+
+PD.gyrB.bean <- as.data.frame.matrix(otu_table(mer.gyrB.b))
+Faith.gyrB.bean <- pd(samp = PD.gyrB.bean, tree = phy_tree(mer.gyrB.b), include.root = F) 
+d.faith.gyrB.bean <- merge(sample_data(mer.gyrB.b), Faith.gyrB.bean, by="row.names", all=TRUE) 
+d.faith.gyrB.bean$DAP <- as.factor(d.faith.gyrB.bean$DAP) 
+
+kruskal.test(PD ~ DAP, d.faith.gyrB.bean) # p-value = 0.1611, then post-hoc non significant
+
+PD.gyrB.b <- ggplot(data=d.faith.gyrB.bean,
+                              aes_string(x='DAP',y='PD', fill='DAP')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = DAP)) +
+     ggtitle("Bean - gyrB")+ 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Day after polination") + 
+  ylab ("Phylogenetic diversity") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B")) +
+  scale_color_manual(values = c("#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B"))
+
+PD.gyrB.rad <- as.data.frame.matrix(otu_table(mer.gyrB.r))
+Faith.gyrB.rad <- pd(samp = PD.gyrB.rad, tree = phy_tree(mer.gyrB.r), include.root = F) 
+d.faith.gyrB.rad <- merge(sample_data(mer.gyrB.r), Faith.gyrB.rad, by="row.names", all=TRUE) 
+d.faith.gyrB.rad$DAP <- as.factor(d.faith.gyrB.rad$DAP) 
+
+kruskal.test(PD ~ DAP, d.faith.gyrB.rad) # p-value = 0.5326 non significant
+
+PD.gyrB.r <- ggplot(data=d.faith.gyrB.rad,
+                              aes_string(x='DAP',y='PD', fill='DAP')) +
+   geom_boxplot(outlier.shape = NA) +
+   geom_jitter(aes(colour = DAP)) +
+     ggtitle("Radish - gyrB") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Day after polination") + 
+  ylab ("Phylogenetic diversity") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01")) +
+  scale_color_manual(values = c("#F6E3CE", "#FAAC58", "#DF3A01"))
+```
+
+```{r, echo=FALSE, message=FALSE}
+Plot_PD <- plot_grid(PD.16S.b, PD.16S.r, PD.gyrB.b, PD.gyrB.r)
+Plot_PD
+```
+
+
+## 6.7 - Phylogenetic tree 
+```{r, echo=FALSE, message=FALSE}
+tree.16S.b <- plot_tree(mer.16S.b, nodelabf=nodeplotblank, 
+          ladderize="left", 
+          color="Order",
+          shape="DAP",
+          base.spacing=0.08,
+          size="abundance",
+          sizebase=4)  +
+  ggtitle("16S bean")
+tree.16S.b
+```
+
+# 7 - Agglomerate all seed at individual plant level.
+
+Here all seed communities are agglomerate at the individual plant level using all taxa and not only the 1st rank taxa. Since taxa abundance is distorted by the synthetic media (as well as PCR amplification), we first transform taxa abundance in presence/absence by sample and then merged per plant.
+
+```{r, echo=FALSE, message=FALSE}
+library(phyloseq); packageVersion("phyloseq")
+d16S.nf <- readRDS("16S.nf_PS_clean.rds") #2399 taxa and 1424 samples
+dgyrB.nf <- readRDS("gyrB.nf_PS_clean.rds") #4816 taxa and 1399 samples
+
+#Select second dataset
+d16S.nf.exp1 <- subset_samples(d16S.nf, Experiment == "Exp1") 
+d16S.nf.exp1  <- filter_taxa(d16S.nf.exp1,function(x) sum (x)>0, TRUE)
+dgyrB.nf.exp1 <- subset_samples(dgyrB.nf, Experiment == "Exp1") 
+dgyrB.nf.exp1  <- filter_taxa(dgyrB.nf.exp1,function(x) sum (x)>0, TRUE)
+#Select seed only
+d16S.nf.exp1.seed <- subset_samples(d16S.nf.exp1, Habitat =="Seed")
+d16S.nf.exp1.seed  <- filter_taxa(d16S.nf.exp1.seed,function(x) sum (x)>0, TRUE)
+dgyrB.nf.exp1.seed <- subset_samples(dgyrB.nf.exp1, Habitat =="Seed")
+dgyrB.nf.exp1.seed  <- filter_taxa(dgyrB.nf.exp1.seed,function(x) sum (x)>0, TRUE)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+design.16S.nf <- data.frame(sample_data(d16S.nf.exp1))
+design.gyrB.nf <- data.frame(sample_data(dgyrB.nf.exp1))
+library(tidyverse)
+design.16S.nf <- design.16S.nf %>% 
+  unite(DAP_Plant, DAP, Plant, sep="_", remove=FALSE) %>%
+  select(Plant.species, DAP_Plant, DAP, Plant, Habitat)
+design.gyrB.nf <- design.gyrB.nf %>% 
+  unite(DAP_Plant, DAP, Plant, sep="_", remove=FALSE) %>%
+  select(Plant.species, DAP_Plant, DAP, Plant, Habitat)
+#Change otu table in presence/absence
+count.16S.nf <- as.data.frame(otu_table(d16S.nf.exp1))
+count.16S.nf[count.16S.nf> 0] <- 1
+d16S.nf.exp1 <- phyloseq(sample_data(design.16S.nf),
+                  tax_table(d16S.nf.exp1),
+                  refseq(d16S.nf.exp1),
+                  phy_tree(d16S.nf.exp1),
+                   otu_table(count.16S.nf, taxa_are_rows = FALSE)) 
+count.gyrB.nf <- as.data.frame(otu_table(dgyrB.nf.exp1))
+count.gyrB.nf[count.gyrB.nf> 0] <- 1
+dgyrB.nf.exp1 <- phyloseq(sample_data(design.gyrB.nf),
+                  tax_table(dgyrB.nf.exp1),
+                  refseq(dgyrB.nf.exp1),
+                  phy_tree(dgyrB.nf.exp1),
+                   otu_table(count.gyrB.nf, taxa_are_rows = FALSE)) 
+#Agglomerate individual seeds at the local plant level.
+d16S.nf.exp1.seed <- subset_samples(d16S.nf.exp1, Habitat =="Seed")
+d16S.nf.exp1.seed.mer <- merge_samples(d16S.nf.exp1.seed, "DAP_Plant")
+dgyrB.nf.exp1.seed <- subset_samples(dgyrB.nf.exp1, Habitat =="Seed")
+dgyrB.nf.exp1.seed.mer <- merge_samples(dgyrB.nf.exp1.seed, "DAP_Plant")
+#Select sources 
+d16S.nf.exp1.other <- subset_samples(d16S.nf.exp1, Habitat !="Seed")
+dgyrB.nf.exp1.other <- subset_samples(dgyrB.nf.exp1, Habitat !="Seed")
+#merge
+otu.seed.16S.nf <- as.data.frame(t(otu_table(d16S.nf.exp1.seed.mer)))
+otu.other.16S.nf <- as.data.frame(t(otu_table(d16S.nf.exp1.other)))
+otu.all.16S.nf <- t(cbind(otu.seed.16S.nf, otu.other.16S.nf))
+design.all.16S.nf <- read.csv("design_habitats_16S.csv", sep=",", header= TRUE, row.names=1)
+otu.seed.gyrB.nf <- as.data.frame(t(otu_table(dgyrB.nf.exp1.seed.mer)))
+otu.other.gyrB.nf <- as.data.frame(t(otu_table(dgyrB.nf.exp1.other)))
+otu.all.gyrB.nf <- t(cbind(otu.seed.gyrB.nf, otu.other.gyrB.nf))
+design.all.gyrB.nf <- read.csv("design_habitats_gyrB.csv", sep=",", header= TRUE, row.names=1)
+#New phyloseq object
+agg.16S.nf <- phyloseq(sample_data(design.all.16S.nf), tax_table(d16S.nf.exp1), phy_tree(d16S.nf.exp1),
+                   otu_table(otu.all.16S.nf, taxa_are_rows = FALSE)) # 452 taxa and 146 samples
+agg.gyrB.nf <- phyloseq(sample_data(design.all.gyrB.nf), tax_table(dgyrB.nf.exp1), phy_tree(dgyrB.nf.exp1),
+                   otu_table(otu.all.gyrB.nf, taxa_are_rows = FALSE)) # 1239 taxa and 146 samples
+#Remove stage B11
+agg.16S <- subset_samples(agg.16S.nf, DAP !="B11")
+agg.16S <- filter_taxa(agg.16S, function(x) sum (x)>0, TRUE) # 1990 taxa and 141 samples
+agg.gyrB <- subset_samples(agg.gyrB.nf, DAP !="B11")
+agg.gyrB <- filter_taxa(agg.gyrB, function(x) sum (x)>0, TRUE) # 4129 taxa and 142 samples
+```
+
+# 8 - Source microbiota analysis
+
+Three different habitats have been sampled :     
+
+* Air (47 samples)      
+* Stem (5-6 samples per stage)       
+* Flower (5 samples)    
+
+Look at the distribution 
+
+```{r, echo=FALSE, message=FALSE, results="hide", warning=FALSE,}
+qplot(log10(rowSums(otu_table(agg.16S)))) + xlab("Logged counts-per-sample")
+qplot(log10(rowSums(otu_table(agg.gyrB)))) + xlab("Logged counts-per-sample")
+```
+
+## 8.1 - Correlation habitat abundance relative Seeds
+
+We performed correlation between the relative abundance of taxa in  origin compared to seeds
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+library(ggpubr)
+
+#gyrB
+agg.gyrB.b <- subset_samples(agg.gyrB, Plant_species %in% c("Bean"))
+agg.gyrB.r <- subset_samples(agg.gyrB, Plant_species %in% c("Radish"))
+
+#Bean gyrB
+agg.gyrB.b.mer <- merge_samples(agg.gyrB.b, "Habitats")
+sample_data(agg.gyrB.b.mer)$Habitats <- c("Air", "Flower", "Seed", "Stem")
+
+
+agg.gyrB.b.mer.Air <- subset_samples(agg.gyrB.b.mer, Habitats %in% c("Air"))
+agg.gyrB.b.mer.Stem <- subset_samples(agg.gyrB.b.mer, Habitats %in% c("Stem"))
+agg.gyrB.b.mer.Flower <- subset_samples(agg.gyrB.b.mer, Habitats %in% c("Flower"))
+agg.gyrB.b.mer.Seed <- subset_samples(agg.gyrB.b.mer, Habitats %in% c("Seed"))
+
+agg.gyrB.b.mer.Air = transform_sample_counts(agg.gyrB.b.mer.Air, function(x) x/sum(x))
+agg.gyrB.b.mer.Stem = transform_sample_counts(agg.gyrB.b.mer.Stem, function(x) x/sum(x))
+agg.gyrB.b.mer.Flower = transform_sample_counts(agg.gyrB.b.mer.Flower, function(x) x/sum(x))
+agg.gyrB.b.mer.Seed = transform_sample_counts(agg.gyrB.b.mer.Seed, function(x) x/sum(x))
+
+agg.gyrB.b.mer.Final <- merge_phyloseq(agg.gyrB.b.mer.Air, agg.gyrB.b.mer.Stem, agg.gyrB.b.mer.Flower, agg.gyrB.b.mer.Seed)
+
+cor.or.f <- cbind(data.frame(t(otu_table(agg.gyrB.b.mer.Final))), data.frame(tax_table(agg.gyrB.b.mer.Final)))
+#cor.or.f2 <- subset(cor.or.f, !Seed %in% c(0))
+cor.or.f2 <- cor.or.f
+
+library(tidyverse)
+#log +0.000001 transformation
+#cor.or.f2$Air <- log10(cor.or.f2$Air+0.0001) 
+#cor.or.f2$Stem <- log10(cor.or.f2$Stem+0.0001) 
+#cor.or.f2$Flower <- log10(cor.or.f2$Flower+0.0001) 
+#cor.or.f2$Seed <- log10(cor.or.f2$Seed+0.0001) 
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Plot Air
+plot.cor.or.air <-ggplot(cor.or.f2, aes(x=Air, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Bean - gyrB") + 
+    scale_color_manual(values=c("#31B404")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in air") +
+    stat_cor(method = "pearson") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, .05)) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, .025)) + geom_abline()
+plot.cor.or.air
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Calculate coefficient of determination
+cor.Stem <- lm(Stem ~ Seed, data=cor.or.f2) 
+summary(cor.Stem)
+
+#Plot Stem
+plot.cor.or.stem <-ggplot(cor.or.f2, aes(x=Stem, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Bean - gyrB") + 
+    scale_color_manual(values=c("#31B404")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in stem") +
+    stat_cor(method = "pearson") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, .05)) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, .025)) + geom_abline()
+plot.cor.or.stem
+
+#Calculate coefficient of determination
+cor.Flower <- lm(Flower ~ Seed, data=cor.or.f2) 
+summary(cor.Flower)
+
+
+#Plot Flower
+plot.cor.or.flower <-ggplot(cor.or.f2, aes(x=Flower, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Bean - gyrB") + 
+    scale_color_manual(values=c("#31B404")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in flower") +
+    stat_cor(method = "pearson") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(labels = scales::percent) + geom_abline()
+plot.cor.or.flower
+```
+
+```{r, echo=FALSE, message=FALSE}
+Plot_or_cor <- plot_grid( plot.cor.or.air, plot.cor.or.stem, plot.cor.or.flower)
+Plot_or_cor
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Radish gyrB
+agg.gyrB.r.mer <- merge_samples(agg.gyrB.b, "Habitats")
+sample_data(agg.gyrB.r.mer)$Habitats <- c("Air", "Flower", "Seed", "Stem")
+
+
+agg.gyrB.r.mer.Air <- subset_samples(agg.gyrB.r.mer, Habitats %in% c("Air"))
+agg.gyrB.r.mer.Stem <- subset_samples(agg.gyrB.r.mer, Habitats %in% c("Stem"))
+agg.gyrB.r.mer.Flower <- subset_samples(agg.gyrB.r.mer, Habitats %in% c("Flower"))
+agg.gyrB.r.mer.Seed <- subset_samples(agg.gyrB.r.mer, Habitats %in% c("Seed"))
+
+agg.gyrB.r.mer.Air = transform_sample_counts(agg.gyrB.r.mer.Air, function(x) x/sum(x))
+agg.gyrB.r.mer.Stem = transform_sample_counts(agg.gyrB.r.mer.Stem, function(x) x/sum(x))
+agg.gyrB.r.mer.Flower = transform_sample_counts(agg.gyrB.r.mer.Flower, function(x) x/sum(x))
+agg.gyrB.r.mer.Seed = transform_sample_counts(agg.gyrB.r.mer.Seed, function(x) x/sum(x))
+
+agg.gyrB.r.mer.Final <- merge_phyloseq(agg.gyrB.r.mer.Air, agg.gyrB.r.mer.Stem, agg.gyrB.r.mer.Flower, agg.gyrB.r.mer.Seed)
+
+cor.or.f <- cbind(data.frame(t(otu_table(agg.gyrB.r.mer.Final))), data.frame(tax_table(agg.gyrB.r.mer.Final)))
+#cor.or.f2 <- subset(cor.or.f, !Seed %in% c(0))
+cor.or.f2 <- cor.or.f
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Plot Air
+plot.cor.or.air <-ggplot(cor.or.f2, aes(x=Air, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Radish - gyrB") + 
+    scale_color_manual(values=c("#DF3A01")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in air") +
+    stat_cor(method = "pearson") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, .05)) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, .025)) + geom_abline()
+plot.cor.or.air
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Calculate coefficient of determination
+cor.Stem <- lm(Stem ~ Seed, data=cor.or.f2) 
+summary(cor.Stem)
+
+#Plot Stem
+plot.cor.or.stem <-ggplot(cor.or.f2, aes(x=Stem, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Radish - gyrB") + 
+    scale_color_manual(values=c("#DF3A01")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in stem") +
+    stat_cor(method = "pearson") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, .05)) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, .025)) + geom_abline()
+plot.cor.or.stem
+
+#Calculate coefficient of determination
+cor.Flower <- lm(Flower ~ Seed, data=cor.or.f2) 
+summary(cor.Flower)
+
+
+#Plot Flower
+plot.cor.or.flower <-ggplot(cor.or.f2, aes(x=Flower, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Radish - gyrB") + 
+    scale_color_manual(values=c("#DF3A01")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in flower") +
+    stat_cor(method = "pearson") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, .05)) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, .025)) + geom_abline()
+plot.cor.or.flower
+```
+
+
+
+```{r, echo=FALSE, message=FALSE}
+
+Plot_or_cor <- plot_grid( plot.cor.or.air, plot.cor.or.stem, plot.cor.or.flower)
+Plot_or_cor
+```
+
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+
+#16S
+agg.16S.b <- subset_samples(agg.16S, Plant_species %in% c("Bean"))
+agg.16S.r <- subset_samples(agg.16S, Plant_species %in% c("Radish"))
+
+#Bean 16S
+agg.16S.b.mer <- merge_samples(agg.16S.b, "Habitats")
+sample_data(agg.16S.b.mer)$Habitats <- c("Air", "Flower", "Seed", "Stem")
+
+
+agg.16S.b.mer.Air <- subset_samples(agg.16S.b.mer, Habitats %in% c("Air"))
+agg.16S.b.mer.Stem <- subset_samples(agg.16S.b.mer, Habitats %in% c("Stem"))
+agg.16S.b.mer.Flower <- subset_samples(agg.16S.b.mer, Habitats %in% c("Flower"))
+agg.16S.b.mer.Seed <- subset_samples(agg.16S.b.mer, Habitats %in% c("Seed"))
+
+agg.16S.b.mer.Air = transform_sample_counts(agg.16S.b.mer.Air, function(x) x/sum(x))
+agg.16S.b.mer.Stem = transform_sample_counts(agg.16S.b.mer.Stem, function(x) x/sum(x))
+agg.16S.b.mer.Flower = transform_sample_counts(agg.16S.b.mer.Flower, function(x) x/sum(x))
+agg.16S.b.mer.Seed = transform_sample_counts(agg.16S.b.mer.Seed, function(x) x/sum(x))
+
+agg.16S.b.mer.Final <- merge_phyloseq(agg.16S.b.mer.Air, agg.16S.b.mer.Stem, agg.16S.b.mer.Flower, agg.16S.b.mer.Seed)
+
+cor.or.f <- cbind(data.frame(t(otu_table(agg.16S.b.mer.Final))), data.frame(tax_table(agg.16S.b.mer.Final)))
+#cor.or.f2 <- subset(cor.or.f, !Seed %in% c(0))
+cor.or.f2 <- cor.or.f
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Plot Air
+plot.cor.or.air <-ggplot(cor.or.f2, aes(x=Air, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Bean - 16S") + 
+    scale_color_manual(values=c("#31B404")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in air") +
+    stat_cor(method = "pearson")
+plot.cor.or.air
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Calculate coefficient of determination
+cor.Stem <- lm(Stem ~ Seed, data=cor.or.f2) 
+summary(cor.Stem)
+
+#Plot Stem
+plot.cor.or.stem <-ggplot(cor.or.f2, aes(x=Stem, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Bean - 16S") + 
+    scale_color_manual(values=c("#31B404")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in stem") +
+    stat_cor(method = "pearson")
+plot.cor.or.stem
+
+#Calculate coefficient of determination
+cor.Flower <- lm(Flower ~ Seed, data=cor.or.f2) 
+summary(cor.Flower)
+
+
+#Plot Flower
+plot.cor.or.flower <-ggplot(cor.or.f2, aes(x=Flower, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Bean - 16S") + 
+    scale_color_manual(values=c("#31B404")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in flower") +
+    stat_cor(method = "pearson")
+plot.cor.or.flower
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+Plot_or_cor <- plot_grid( plot.cor.or.air, plot.cor.or.stem, plot.cor.or.flower)
+Plot_or_cor
+```
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+
+#Radish 16S
+agg.16S.r.mer <- merge_samples(agg.16S.b, "Habitats")
+sample_data(agg.16S.r.mer)$Habitats <- c("Air", "Flower", "Seed", "Stem")
+
+
+agg.16S.r.mer.Air <- subset_samples(agg.16S.r.mer, Habitats %in% c("Air"))
+agg.16S.r.mer.Stem <- subset_samples(agg.16S.r.mer, Habitats %in% c("Stem"))
+agg.16S.r.mer.Flower <- subset_samples(agg.16S.r.mer, Habitats %in% c("Flower"))
+agg.16S.r.mer.Seed <- subset_samples(agg.16S.r.mer, Habitats %in% c("Seed"))
+
+agg.16S.r.mer.Air = transform_sample_counts(agg.16S.r.mer.Air, function(x) x/sum(x))
+agg.16S.r.mer.Stem = transform_sample_counts(agg.16S.r.mer.Stem, function(x) x/sum(x))
+agg.16S.r.mer.Flower = transform_sample_counts(agg.16S.r.mer.Flower, function(x) x/sum(x))
+agg.16S.r.mer.Seed = transform_sample_counts(agg.16S.r.mer.Seed, function(x) x/sum(x))
+
+agg.16S.r.mer.Final <- merge_phyloseq(agg.16S.r.mer.Air, agg.16S.r.mer.Stem, agg.16S.r.mer.Flower, agg.16S.r.mer.Seed)
+
+cor.or.f <- cbind(data.frame(t(otu_table(agg.16S.r.mer.Final))), data.frame(tax_table(agg.16S.r.mer.Final)))
+#cor.or.f2 <- subset(cor.or.f, !Seed %in% c(0))
+cor.or.f2 <- cor.or.f
+
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Plot Air
+plot.cor.or.air <-ggplot(cor.or.f2, aes(x=Air, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Radish - 16S") + 
+    scale_color_manual(values=c("#DF3A01")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in air") +
+    stat_cor(method = "pearson")
+plot.cor.or.air
+
+#Calculate coefficient of determination
+cor.Air <- lm(Air ~ Seed, data=cor.or.f2) 
+summary(cor.Air)
+
+
+#Calculate coefficient of determination
+cor.Stem <- lm(Stem ~ Seed, data=cor.or.f2) 
+summary(cor.Stem)
+
+#Plot Stem
+plot.cor.or.stem <-ggplot(cor.or.f2, aes(x=Stem, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Radish - 16S") + 
+    scale_color_manual(values=c("#DF3A01")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in stem") +
+    stat_cor(method = "pearson")
+plot.cor.or.stem
+
+#Calculate coefficient of determination
+cor.Flower <- lm(Flower ~ Seed, data=cor.or.f2) 
+summary(cor.Flower)
+
+
+#Plot Flower
+plot.cor.or.flower <-ggplot(cor.or.f2, aes(x=Flower, y=Seed)) +
+  geom_point() + 
+  geom_smooth(aes(colour = "Bean"),method='lm') +
+  ggtitle("Radish - 16S") + 
+    scale_color_manual(values=c("#DF3A01")) +
+  theme(legend.position = "none", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold"))+  
+    ylab ("Relative abundance in seeds") + xlab ("Relative abundance in flower") +
+    stat_cor(method = "pearson")
+plot.cor.or.flower
+```
+
+```{r, echo=FALSE, message=FALSE}
+Plot_or_cor <- plot_grid( plot.cor.or.air, plot.cor.or.stem, plot.cor.or.flower)
+Plot_or_cor
+```
+
+## 8.2 - Bacterial richness
+
+We then compared bacterial richness in each habitat
+
+
+```{r, echo=FALSE, message=FALSE, results="hide", fig.show='hide'}
+#Prepare palette color for habitats
+
+  name_origin <- c("Air", "Stem", "Flower", "Air_Stem", "Air_Flower", "Stem_Flower", "Air_Stem_Flower", "Unknown", "Seed")
+  
+  # desired color palette
+  OriginPalette <- c("#0099FF", "#33CC33", "#FFB34D", "#8080CC", "#1AB399", "#C09A08", "#996666", "#BDBDBD", "#8F3A84")
+  
+  # associated EnvType level
+  names(OriginPalette) <- name_origin
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+
+#Split Plant_species
+agg.16S.b <- subset_samples(agg.16S, Plant_species %in% c("Bean"))
+agg.16S.r <- subset_samples(agg.16S, Plant_species %in% c("Radish"))
+
+agg.gyrB.b <- subset_samples(agg.gyrB, Plant_species %in% c("Bean"))
+agg.gyrB.r <- subset_samples(agg.gyrB, Plant_species %in% c("Radish"))
+
+
+#richness
+#16S radish
+r.agg.16S <- estimate_richness(agg.16S, split = TRUE, measures=c("Observed"))
+dat.agg.16S <- cbind(sample_data(agg.16S), r.agg.16S) 
+
+
+p.r.agg.16S <- ggplot(data=dat.agg.16S, aes_string(x='Habitats',y='Observed', fill='Habitats')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  facet_grid(Plant_species ~ Stage) +
+  ggtitle("Richness - 16S") + 
+theme(  strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    ylab ("Observed ASV richness") + 
+  scale_fill_manual(values=OriginPalette)
+p.r.agg.16S
+
+#gyrB bean
+r.agg.gyrB.b <- estimate_richness(agg.gyrB.b, split = TRUE, measures=c("Observed"))
+dat.agg.gyrB.b <- cbind(sample_data(agg.gyrB.b), r.agg.gyrB.b) 
+
+#Stats
+#GLM on richness 
+library(lme4)
+library(MASS)
+library(car)
+library(emmeans)
+
+
+ric.bean.gyrB.habitat <- glm.nb(Observed ~ DAP * Habitats , data = dat.agg.gyrB.b)
+summary(ric.bean.gyrB.habitat)
+1- pchisq(summary(ric.bean.gyrB.habitat)$deviance,
+          summary(ric.bean.gyrB.habitat)$df.residual) #OK 0.3855936
+
+emm.ric.bean.gyrB.habitat <- emmeans(ric.bean.gyrB.habitat, ~ Habitats | DAP)
+stat_bean_gyrB.habitat <- multcomp::cld(emm.ric.bean.gyrB.habitat, alpha = 0.05, Letters=letters) #No significant differences
+
+#Manage data frame for DAP stats
+Habitat_stats_bean_gyrB <- data.frame(group = c(stat_bean_gyrB.habitat$.group), Habitats = c("Stem", "Flower", "Air","Seed", "Stem", "Air", "Seed","Flower", "Stem", "Air", "Seed","Flower", "Stem", "Air", "Seed","Flower", "Stem", "Air", "Seed","Flower"))
+Habitat_stats_bean_gyrB <- subset(Habitat_stats_bean_gyrB, !group %in% c(""))    
+Habitat_stats_bean_gyrB$DAP <- c("D02","D02","D02", "D27", "D27", "D27", "D33", "D33", "D33","D42","D42", "D42", "D50", "D50", "D50")      
+
+
+
+p.r.agg.gyrB.b <- ggplot(data=dat.agg.gyrB.b, aes_string(x='Habitats',y='Observed', fill='Habitats')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  facet_grid( ~ DAP, scales = "free") +
+  ggtitle("Bean - gyrB") + 
+ theme( strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold", angle = 90), 
+        axis.text.y = element_text(face = "bold")) +
+  ylab("Observed ASV richness") + 
+  scale_fill_manual(values=OriginPalette) +  guides(size = FALSE) + 
+   geom_text( data    = Habitat_stats_bean_gyrB, mapping = aes(x = Habitats, y = 425, label = group), size = 4)
+p.r.agg.gyrB.b
+
+
+#gyrB bean
+r.agg.gyrB.r <- estimate_richness(agg.gyrB.r, split = TRUE, measures=c("Observed"))
+dat.agg.gyrB.r <- cbind(sample_data(agg.gyrB.r), r.agg.gyrB.r) 
+
+ric.rad.gyrB.habitat <- glm.nb(Observed ~ DAP * Habitats , data = dat.agg.gyrB.r)
+summary(ric.rad.gyrB.habitat)
+1- pchisq(summary(ric.rad.gyrB.habitat)$deviance,
+          summary(ric.rad.gyrB.habitat)$df.residual) #OK 0.3855936
+
+emm.ric.rad.gyrB.habitat <- emmeans(ric.rad.gyrB.habitat, ~ Habitats | DAP)
+stat_rad_gyrB.habitat <- multcomp::cld(emm.ric.rad.gyrB.habitat, alpha = 0.05, Letters=letters)
+
+#Manage data frame for DAP stats
+Habitat_stats_rad_gyrB <- data.frame(group = c(stat_rad_gyrB.habitat$.group), Habitats = c("Stem", "Flower", "Air","Seed", "Stem", "Seed", "Air","Flower", "Stem", "Air", "Seed","Flower", "Stem", "Air", "Seed","Flower"))
+Habitat_stats_rad_gyrB <- subset(Habitat_stats_rad_gyrB, !group %in% c(""))    
+Habitat_stats_rad_gyrB$DAP <- c("D03","D03","D03", "D26", "D26", "D37", "D37", "D37","D65","D65", "D65")      
+
+
+
+
+p.r.agg.gyrB.r <- ggplot(data=dat.agg.gyrB.r, aes_string(x='Habitats',y='Observed', fill='Habitats')) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter() +
+  facet_grid( ~ DAP, scales = "free") +
+  ggtitle("Radish - gyrB") + 
+ theme( strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold", angle = 90), 
+        axis.text.y = element_text(face = "bold")) +
+    ylab("Observed ASV richness") + 
+  scale_fill_manual(values=OriginPalette) +  guides(size = FALSE)  +
+ geom_text( data    = Habitat_stats_rad_gyrB, mapping = aes(x = Habitats, y = 235, label = group), size = 4)
+p.r.agg.gyrB.r
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+p.r.agg.gyrB.b
+p.r.agg.gyrB.r
+```
+
+
+## 8.3 - Beta-diversity
+
+We measured phylogenetic similarities between habitats (Flower, Stem and Air) and plants over time.
+We performed a log(1+x) transformation and assess wUF distance.
+
+```{r, echo=FALSE, message=FALSE, results="hide", warning=FALSE,}
+log.agg.16S <- transform_sample_counts(agg.16S, function(x) log(1 + x))
+log.agg.gyrB <- transform_sample_counts(agg.gyrB, function(x) log(1 + x))
+
+```
+
+Calculate weighted UniFrac distance 
+```{r, echo=FALSE, message=FALSE, results="hide", warning=FALSE,}
+wUF.16S <- ordinate(log.agg.16S, "PCoA", "wunifrac")
+wUF.gyrB <- ordinate(log.agg.gyrB, "PCoA", "wunifrac")
+log.agg.gyrB.b <- subset_samples(log.agg.gyrB, Plant_species %in% c("Bean"))
+wUF.gyrB.b <- ordinate(log.agg.gyrB.b, "PCoA", "wunifrac")
+log.agg.gyrB.r <- subset_samples(log.agg.gyrB, Plant_species %in% c("Radish"))
+wUF.gyrB.r <- ordinate(log.agg.gyrB.r, "PCoA", "wunifrac")
+```
+
+Ordination
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.show='hide'}
+pcoa.wUF.16S <- plot_ordination(log.agg.16S, wUF.16S, type="samples", color="Habitats") + 
+  geom_point(size=5) +
+  facet_grid(Plant_species ~ Stage) +
+  ggtitle("wUF 16S") +
+ theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  guides(size = FALSE) +
+  scale_color_manual(values=OriginPalette)
+
+#Global
+log.agg.gyrB.b <- subset_samples(log.agg.gyrB, Plant_species %in% c("Bean"))
+log.agg.gyrB.r <- subset_samples(log.agg.gyrB, Plant_species %in% c("Radish"))
+
+pcoa.wUF.gyrBb<- plot_ordination(log.agg.gyrB.b, wUF.gyrB.b, type="samples") + 
+  geom_point(aes(fill=DAP), shape = 21,size = 4,colour = "black") +
+  facet_grid( ~ Habitats) +
+  ggtitle("Bean - gyrB") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  guides(size = FALSE) +
+  scale_color_manual(values=DAPPalette)+
+  scale_fill_manual(values=DAPPalette)
+pcoa.wUF.gyrBb
+
+pcoa.wUF.gyrBr<- plot_ordination(log.agg.gyrB.r, wUF.gyrB.r, type="samples") + 
+  geom_point(aes(fill=DAP), shape = 21,size = 4,colour = "black") +
+  facet_grid( ~ Habitats) +
+  ggtitle("Radish - gyrB") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  guides(size = FALSE) +
+  scale_color_manual(values=DAPPalette)+
+  scale_fill_manual(values=DAPPalette)
+pcoa.wUF.gyrBr
+```
+
+### 8.3.1 - Permanova (Airborne community)
+We first assessed impact on DAP and plant-species on air-borne community through PERMANOVA.
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+log.agg.16S.air <- subset_samples(log.agg.16S, Habitats == "Air") 
+log.agg.16S.air <- filter_taxa(log.agg.16S.air, function(x) sum (x)>0, TRUE) # 629 taxa and 47 samples
+log.agg.gyrB.air <- subset_samples(log.agg.gyrB, Habitats == "Air") 
+log.agg.gyrB.air <- filter_taxa(log.agg.gyrB.air, function(x) sum (x)>0, TRUE) # 1781 taxa and 47 samples
+mdat.16S.air <- as(sample_data(log.agg.16S.air), "data.frame")
+wUF.16S.air <- phyloseq::distance(log.agg.16S.air, method = "wunifrac")
+adonis.16S.air <- adonis2(wUF.16S.air ~ Plant_species * DAP,
+                                data = mdat.16S.air, perm = 999) 
+print(adonis.16S.air)
+mdat.gyrB.air <- as(sample_data(log.agg.gyrB.air), "data.frame")
+wUF.gyrB.air <- phyloseq::distance(log.agg.gyrB.air, method = "wunifrac")
+adonis.gyrB.air <- adonis2(wUF.gyrB.air ~ Plant_species * DAP,
+                                data = mdat.gyrB.air, perm = 999) 
+print(adonis.gyrB.air)
+```
+
+### 8.3.2 - Permanova (Stem/Seeds communities)
+We next assessed the impact of DAP on stem and seed communities with PERMANOVA
+First we subset the dataset in bean and radish before running PERMANOVA.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+log.agg.16S.bean <- subset_samples(log.agg.16S, Plant_species == "Bean")
+log.agg.16S.bean <- filter_taxa(log.agg.16S.bean, function(x) sum (x)>0, TRUE) # 1499 taxa and 86 samples
+log.agg.16S.rad <- subset_samples(log.agg.16S, Plant_species == "Radish")
+log.agg.16S.rad <- filter_taxa(log.agg.16S.rad, function(x) sum (x)>0, TRUE) # 764 taxa and 55 samples
+log.agg.gyrB.bean <- subset_samples(log.agg.gyrB, Plant_species == "Bean")
+log.agg.gyrB.bean <- filter_taxa(log.agg.gyrB.bean, function(x) sum (x)>0, TRUE) # 3358 taxa and 86 samples
+log.agg.gyrB.rad <- subset_samples(log.agg.gyrB, Plant_species == "Radish")
+log.agg.gyrB.rad <- filter_taxa(log.agg.gyrB.rad, function(x) sum (x)>0, TRUE) # 1261 taxa and 56 samples
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(vegan)
+mdat.16S.bean <- as(sample_data(log.agg.16S.bean), "data.frame")
+wUF.16S.bean <- phyloseq::distance(log.agg.16S.bean, method = "wunifrac")
+adonis.16S.bean <- adonis2(wUF.16S.bean ~ Stage * Habitats,
+                                data = mdat.16S.bean, perm = 999) 
+print(adonis.16S.bean)
+```
+
+Strong interaction between Stage and Habitats we then subset by Habitat to assess the relative important of stage in each Habitat.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+log.16S.bean.stem <- subset_samples(log.agg.16S.bean, Habitats == "Stem")
+log.16S.bean.stem <- filter_taxa(log.16S.bean.stem, function(x) sum (x)>0, TRUE) # 236 taxa and 27 samples
+log.16S.bean.seed <- subset_samples(log.agg.16S.bean, Habitats == "Seed")
+log.16S.bean.seed <- filter_taxa(log.16S.bean.seed, function(x) sum (x)>0, TRUE) # 1038 taxa and 24 samples
+log.16S.rad.stem <- subset_samples(log.agg.16S.rad, Habitats == "Stem")
+log.16S.rad.stem <- filter_taxa(log.16S.rad.stem, function(x) sum (x)>0, TRUE) # 88 taxa and 18 samples
+log.16S.rad.seed <- subset_samples(log.agg.16S.rad, Habitats == "Seed")
+log.16S.rad.seed <- filter_taxa(log.16S.rad.seed, function(x) sum (x)>0, TRUE) # 594 taxa and 15 samples
+
+log.gyrB.bean.stem <- subset_samples(log.agg.gyrB.bean, Habitats == "Stem")
+log.gyrB.bean.stem <- filter_taxa(log.gyrB.bean.stem, function(x) sum (x)>0, TRUE) # 453 taxa and 27 samples
+log.gyrB.bean.seed <- subset_samples(log.agg.gyrB.bean, Habitats == "Seed")
+log.gyrB.bean.seed <- filter_taxa(log.gyrB.bean.seed, function(x) sum (x)>0, TRUE) # 1955 taxa and 24 samples
+log.gyrB.rad.stem <- subset_samples(log.agg.gyrB.rad, Habitats == "Stem")
+log.gyrB.rad.stem <- filter_taxa(log.gyrB.rad.stem, function(x) sum (x)>0, TRUE) # 110 taxa and 19 samples
+log.gyrB.rad.seed <- subset_samples(log.agg.gyrB.rad, Habitats == "Seed")
+log.gyrB.rad.seed <- filter_taxa(log.gyrB.rad.seed, function(x) sum (x)>0, TRUE) # 851 taxa and 15 sample
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(vegan)
+mdat.16S.bean.stem <- as(sample_data(log.16S.bean.stem), "data.frame")
+wUF.16S.bean.stem <- phyloseq::distance(log.16S.bean.stem, method = "wunifrac")
+adonis.16S.bean.stem <- adonis2(wUF.16S.bean.stem ~ Stage,
+                                data = mdat.16S.bean.stem, perm = 999) 
+print(adonis.16S.bean.stem)
+mdat.gyrB.bean.stem <- as(sample_data(log.gyrB.bean.stem), "data.frame")
+wUF.gyrB.bean.stem <- phyloseq::distance(log.gyrB.bean.stem, method = "wunifrac")
+adonis.gyrB.bean.stem <- adonis2(wUF.gyrB.bean.stem ~ Stage,
+                                data = mdat.gyrB.bean.stem, perm = 999) 
+print(adonis.gyrB.bean.stem)
+mdat.16S.bean.seed <- as(sample_data(log.16S.bean.seed), "data.frame")
+wUF.16S.bean.seed <- phyloseq::distance(log.16S.bean.seed, method = "wunifrac")
+adonis.16S.bean.seed <- adonis2(wUF.16S.bean.seed ~ Stage,
+                                data = mdat.16S.bean.seed, perm = 999) 
+print(adonis.16S.bean.seed)
+mdat.gyrB.bean.seed <- as(sample_data(log.gyrB.bean.seed), "data.frame")
+wUF.gyrB.bean.seed <- phyloseq::distance(log.gyrB.bean.seed, method = "wunifrac")
+adonis.gyrB.bean.seed <- adonis2(wUF.gyrB.bean.seed ~ Stage,
+                                data = mdat.gyrB.bean.seed, perm = 999) 
+print(adonis.gyrB.bean.seed)
+
+mdat.16S.rad.stem <- as(sample_data(log.16S.rad.stem), "data.frame")
+wUF.16S.rad.stem <- phyloseq::distance(log.16S.rad.stem, method = "wunifrac")
+adonis.16S.rad.stem <- adonis2(wUF.16S.rad.stem ~ Stage,
+                                data = mdat.16S.rad.stem, perm = 999) 
+print(adonis.16S.rad.stem)
+mdat.gyrB.rad.stem <- as(sample_data(log.gyrB.rad.stem), "data.frame")
+wUF.gyrB.rad.stem <- phyloseq::distance(log.gyrB.rad.stem, method = "wunifrac")
+adonis.gyrB.rad.stem <- adonis2(wUF.gyrB.rad.stem ~ Stage,
+                                data = mdat.gyrB.rad.stem, perm = 999) 
+print(adonis.gyrB.rad.stem)
+mdat.16S.rad.seed <- as(sample_data(log.16S.rad.seed), "data.frame")
+wUF.16S.rad.seed <- phyloseq::distance(log.16S.rad.seed, method = "wunifrac")
+adonis.16S.rad.seed <- adonis2(wUF.16S.rad.seed ~ Stage,
+                                data = mdat.16S.rad.seed, perm = 999) 
+print(adonis.16S.rad.seed)
+mdat.gyrB.rad.seed <- as(sample_data(log.gyrB.rad.seed), "data.frame")
+wUF.gyrB.rad.seed <- phyloseq::distance(log.gyrB.rad.seed, method = "wunifrac")
+adonis.gyrB.rad.seed <- adonis2(wUF.gyrB.rad.seed ~ Stage,
+                                data = mdat.gyrB.rad.seed, perm = 999) 
+print(adonis.gyrB.rad.seed)
+```
+
+## 8.4 Taxonomic composition
+
+Taxonomic composition evaluated for each source habitat sampled at each stage of development.    
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+library(reshape2)
+
+#16S
+agg.16S.b <- subset_samples(agg.16S, Plant_species %in% c("Bean"))
+agg.16S.r <- subset_samples(agg.16S, Plant_species %in% c("Radish"))
+
+otu.b <- otu_table(agg.16S.b)
+tax.b <- tax_table(agg.16S.b)
+phy.b <- phy_tree(agg.16S.b)
+design.b <- data.frame(sample_data(agg.16S.b))
+
+otu.r <- otu_table(agg.16S.r)
+tax.r <- tax_table(agg.16S.r)
+phy.r <- phy_tree(agg.16S.r)
+design.r <- data.frame(sample_data(agg.16S.r))
+
+design.b <- design.b %>% 
+  unite(DAP_Habitats, DAP, Habitats, sep="_", remove=FALSE) 
+
+physeqdf.16S.b <- phyloseq(sample_data(design.b),
+                  tax_table(tax.b),
+                  phy_tree(phy.b),
+                   otu_table(otu.b, taxa_are_rows = FALSE)) 
+
+
+design.r <- design.r %>% 
+  unite(DAP_Habitats, DAP, Habitats, sep="_", remove=FALSE) 
+
+physeqdf.16S.r <- phyloseq(sample_data(design.r),
+                  tax_table(tax.r),
+                  phy_tree(phy.r),
+                   otu_table(otu.r, taxa_are_rows = FALSE)) 
+
+
+#Merge per DAP and habitats
+physeqdf.16S.b.mer <- merge_samples(physeqdf.16S.b, "DAP_Habitats")
+sample_data(physeqdf.16S.b.mer)$DAP <- c("D02", "D02", "D02", "D27", "D27", "D27","D33", "D33", "D33","D42", "D42", "D42", "D50", "D50", "D50")
+
+physeqdf.16S.r.mer <- merge_samples(physeqdf.16S.r, "DAP_Habitats")
+sample_data(physeqdf.16S.r.mer)$DAP <- c("D03", "D03", "D03", "D26", "D26","D37", "D37", "D37","D65", "D65", "D65")
+
+#Plot
+p.tax.16S.f.b <- plot_composition(physeqdf.16S.b.mer, "domain", "Bacteria", "order", numberOfTaxa=8, fill="order") +
+  ggtitle ("Bean - 16S") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+  ylab ("Relative abundance (%)") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+
+p.tax.16S.f.r <- plot_composition(physeqdf.16S.r.mer, "domain", "Bacteria", "order", numberOfTaxa=8, fill="order") +
+  ggtitle ("Radish - 16S") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+    ylab ("Relative abundance (%)") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_16S) +
+  scale_color_manual(values=OrderPalette_16S)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+
+#gyrB
+agg.gyrB.b <- subset_samples(agg.gyrB, Plant_species %in% c("Bean"))
+agg.gyrB.r <- subset_samples(agg.gyrB, Plant_species %in% c("Radish"))
+
+otu.b <- otu_table(agg.gyrB.b)
+tax.b <- tax_table(agg.gyrB.b)
+phy.b <- phy_tree(agg.gyrB.b)
+design.b <- data.frame(sample_data(agg.gyrB.b))
+
+
+otu.r <- otu_table(agg.gyrB.r)
+tax.r <- tax_table(agg.gyrB.r)
+phy.r <- phy_tree(agg.gyrB.r)
+design.r <- data.frame(sample_data(agg.gyrB.r))
+
+design.b <- design.b %>% 
+  unite(DAP_Habitats, DAP, Habitats, sep="_", remove=FALSE) 
+
+physeqdf.gyrB.b <- phyloseq(sample_data(design.b),
+                  tax_table(tax.b),
+                  phy_tree(phy.b),
+                   otu_table(otu.b, taxa_are_rows = FALSE)) 
+
+
+design.r <- design.r %>% 
+  unite(DAP_Habitats, DAP, Habitats, sep="_", remove=FALSE) 
+
+physeqdf.gyrB.r <- phyloseq(sample_data(design.r),
+                  tax_table(tax.r),
+                  phy_tree(phy.r),
+                   otu_table(otu.r, taxa_are_rows = FALSE)) 
+
+
+#Merge per DAP and habitat
+physeqdf.gyrB.b.mer <- merge_samples(physeqdf.gyrB.b, "DAP_Habitats")
+sample_data(physeqdf.gyrB.b.mer)$DAP <- c("D02", "D02", "D02", "D27", "D27", "D27","D33", "D33", "D33","D42", "D42", "D42", "D50", "D50", "D50")
+
+physeqdf.gyrB.r.mer <- merge_samples(physeqdf.gyrB.r, "DAP_Habitats")
+sample_data(physeqdf.gyrB.r.mer)$DAP <- c("D03", "D03", "D03", "D26", "D26","D37", "D37", "D37","D65", "D65", "D65")
+
+#Plot
+p.tax.gyrB.f.b <- plot_composition(physeqdf.gyrB.b.mer, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") +
+  ggtitle ("Bean - gyrB") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+    ylab ("Relative abundance (%)") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+
+p.tax.gyrB.f.r <- plot_composition(physeqdf.gyrB.r.mer, "Kingdom", "gyrB", "Order", numberOfTaxa=8, fill="Order") +
+  ggtitle ("Radish - gyrB") + 
+      theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        legend.position =  ("bottom"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) + 
+    ylab ("Relative abundance (%)") +
+  facet_grid(~DAP, scales = "free") +
+    scale_fill_manual(values=OrderPalette_gyrB) +
+  scale_color_manual(values=OrderPalette_gyrB)+ 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+p.tax.16S.f.b
+p.tax.16S.f.r
+
+p.tax.gyrB.f.b
+p.tax.gyrB.f.r
+```
+
+## 8.5 - Origin of seed-borne taxa
+
+We performed analysis with gyrB since this marker is more resolutive than 16S
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+theme_set(theme_bw())
+#Start with bean
+agg.gyrB.b02 <- subset_samples(agg.gyrB, DAP=="D02" & Habitats =="Flower")
+agg.gyrB.b27 <- subset_samples(agg.gyrB, DAP=="D27")
+agg.gyrB.b27 <- merge_phyloseq(agg.gyrB.b02, agg.gyrB.b27)
+agg.gyrB.b27.mer <- merge_samples(agg.gyrB.b27, "Habitats")
+count.b27 <- as.data.frame(t(otu_table(agg.gyrB.b27.mer)))
+binary.b27 <- count.b27 %>% 
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.b27 <- colSums(binary.b27)
+
+agg.gyrB.b33 <- subset_samples(agg.gyrB, DAP=="D33")
+agg.gyrB.b33 <- merge_phyloseq(agg.gyrB.b02, agg.gyrB.b33)
+agg.gyrB.b33.mer <- merge_samples(agg.gyrB.b33, "Habitats")
+count.b33 <- as.data.frame(t(otu_table(agg.gyrB.b33.mer)))
+binary.b33 <- count.b33 %>% 
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.b33 <- colSums(binary.b33)
+
+agg.gyrB.b42 <- subset_samples(agg.gyrB, DAP=="D42")
+agg.gyrB.b42 <- merge_phyloseq(agg.gyrB.b02, agg.gyrB.b42)
+agg.gyrB.b42.mer <- merge_samples(agg.gyrB.b42, "Habitats")
+count.b42 <- as.data.frame(t(otu_table(agg.gyrB.b42.mer)))
+binary.b42 <- count.b42 %>% 
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.b42 <- colSums(binary.b42)
+
+agg.gyrB.b50 <- subset_samples(agg.gyrB, DAP=="D50")
+agg.gyrB.b50 <- merge_phyloseq(agg.gyrB.b02, agg.gyrB.b50)
+agg.gyrB.b50.mer <- merge_samples(agg.gyrB.b50, "Habitats")
+count.b50 <- as.data.frame(t(otu_table(agg.gyrB.b50.mer)))
+binary.b50 <- count.b50 %>% 
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.b50 <- colSums(binary.b50)
+
+ori.bean <- rbind(sum.b27, sum.b33, sum.b42, sum.b50)
+
+#Radish
+
+agg.gyrB.r03 <- subset_samples(agg.gyrB, DAP=="D03" & Habitats =="Flower")
+agg.gyrB.r26 <- subset_samples(agg.gyrB, DAP=="D26")
+agg.gyrB.r26 <- merge_phyloseq(agg.gyrB.r03, agg.gyrB.r26)
+agg.gyrB.r26.mer <- merge_samples(agg.gyrB.r26, "Habitats")
+#Here no air sampled...
+count.r26 <- as.data.frame(t(otu_table(agg.gyrB.r26.mer)))
+binary.r26 <- count.r26 %>% 
+  add_column(Air=0) %>%
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.r26 <- colSums(binary.r26)
+
+agg.gyrB.r37 <- subset_samples(agg.gyrB, DAP=="D37")
+agg.gyrB.r37 <- merge_phyloseq(agg.gyrB.r03, agg.gyrB.r37)
+agg.gyrB.r37.mer <- merge_samples(agg.gyrB.r37, "Habitats")
+count.r37 <- as.data.frame(t(otu_table(agg.gyrB.r37.mer)))
+binary.r37 <- count.r37 %>% 
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.r37 <- colSums(binary.r37)
+
+agg.gyrB.r65 <- subset_samples(agg.gyrB, DAP=="D65")
+agg.gyrB.r65 <- merge_phyloseq(agg.gyrB.r03, agg.gyrB.r65)
+agg.gyrB.r65.mer <- merge_samples(agg.gyrB.r65, "Habitats")
+count.r65 <- as.data.frame(t(otu_table(agg.gyrB.r65.mer)))
+binary.r65 <- count.r65 %>% 
+  filter(Seed >= 1) %>% 
+  mutate_if(is.numeric, ~1 * (. > 0)) %>%
+  mutate(sum = rowSums(.)) %>%
+  mutate(unknown = ifelse(sum>1, "0", "1")) %>%
+  mutate(stem = ifelse(sum==2 & Stem==1, "1", "0")) %>%
+  mutate(air = ifelse(sum==2 & Air==1, "1", "0")) %>%
+  mutate(flower = ifelse(sum==2 & Flower==1, "1", "0")) %>%
+  mutate(air_stem = ifelse(sum==3 & Air==1 & Stem==1, "1", "0")) %>%
+  mutate(air_flower = ifelse(sum==3 & Air==1 & Flower==1, "1", "0")) %>%
+  mutate(flower_stem = ifelse(sum==3 & Flower==1 & Stem==1, "1", "0")) %>%
+  mutate(all = ifelse(sum >3, "1", "0")) %>%
+  rename(seed = Seed) %>%
+  select(seed, unknown, air, stem, flower, air_stem, air_flower, flower_stem, all) %>%
+  mutate_if(is.character, as.numeric) 
+sum.r65 <- colSums(binary.r65)
+
+ori.rad <- rbind(sum.r26, sum.r37, sum.r65)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+
+#Prepare palette color for habitats
+
+  name_origin <- c("Air", "Stem", "Flower", "Air and Stem", "Air and Flower", "Flower and Stem", "All", "Unknown", "Seed")
+  
+  # desired color palette
+  OriginPalette <- c("#0099FF", "#33CC33", "#FFB34D", "#8080CC", "#1AB399", "#C09A08", "#996666", "#BDBDBD", "#8F3A84")
+  
+  # associated EnvType level
+  names(OriginPalette) <- name_origin
+
+# Calculate counts
+
+ori.bean <- data.frame(ori.bean)
+ori.bean$DAP <- c("D27", "D33", "D42", "D50")
+ori.bean$Plant_species <- c("Bean")
+
+ori.rad <- data.frame(ori.rad)
+ori.rad$DAP <- c("D26", "D37", "D65")
+ori.rad$Plant_species <- c("Radish")
+
+
+ori.f <- rbind(ori.bean, ori.rad)
+ori.f2 <- tidyr::gather(ori.f, "Habitat", "count", -DAP, -Plant_species )
+ori.f3 <- subset(ori.f2, !Habitat %in% c("air_flower"))
+
+# Calculate percents
+ori.ff <- ori.f
+ori.ff$DAP <- NULL
+ori.ff$Plant_species <- NULL
+ori.ff$seed <- NULL
+ori.f.p <- round(ori.ff/rowSums(ori.ff), 2)
+ori.f.p <- data.frame(ori.f.p)
+ori.f.p$DAP <- ori.f$DAP
+ori.f.p$Plant_species <- ori.f$Plant_species
+
+
+ori.f.p2 <- tidyr::gather(ori.f.p, "Habitat", "count", -DAP, -Plant_species )
+ori.f.p3 <- subset(ori.f.p2, !Habitat %in% c("air_flower"))
+
+#Plot
+library(scales)
+library(ggforce)
+library(grid)
+source("~/These2/Script R/F2S-diversite/F2S-year-4/Rscripts/facet_zoom2.R")
+
+
+ori.f3.b <- subset(ori.f3, Plant_species %in% c("Bean"))
+ori.f3.r <- subset(ori.f3, Plant_species %in% c("Radish"))
+
+ori.f3.b$Habitat<-ifelse(ori.f3.b$Habitat == "air",'Air',
+                             ifelse(ori.f3.b$Habitat == "all",'All',
+                             ifelse(ori.f3.b$Habitat == "flower_stem",'Flower and Stem',
+                             ifelse(ori.f3.b$Habitat == "air_stem",'Air and Stem',
+                             ifelse(ori.f3.b$Habitat == "flower",'Flower',
+                             ifelse(ori.f3.b$Habitat == "stem",'Stem',
+                             ifelse(ori.f3.b$Habitat == "seed",'Seed',
+                                    ifelse(ori.f3.b$Habitat == "unknown",'Unknown','Unknown'))))))))
+
+Plot_dynamic_bean <- ggplot(ori.f3.b, aes(x=DAP, y=count, group=Habitat, col=Habitat, fill=Habitat)) +
+      geom_point(alpha = 0.5, size = 4) +
+      geom_line() +
+  facet_grid(~Plant_species) +
+    ggtitle("Bean - gyrB") +
+  theme(legend.position = "bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  xlab ("Days after polination") + ylab("Number of ASVs") +
+    scale_fill_manual(values=OriginPalette) + 
+    scale_color_manual(values=OriginPalette) + 
+  facet_zoom2(ylim = c(0, 80), split = TRUE)
+Plot_dynamic_bean
+
+ori.f3.r$Habitat<-ifelse(ori.f3.r$Habitat == "air",'Air',
+                             ifelse(ori.f3.r$Habitat == "all",'All',
+                             ifelse(ori.f3.r$Habitat == "flower_stem",'Flower and Stem',
+                             ifelse(ori.f3.r$Habitat == "air_stem",'Air and Stem',
+                             ifelse(ori.f3.r$Habitat == "flower",'Flower',
+                             ifelse(ori.f3.r$Habitat == "stem",'Stem',
+                             ifelse(ori.f3.r$Habitat == "seed",'Seed',
+                                    ifelse(ori.f3.r$Habitat == "unknown",'Unknown','Unknown'))))))))
+
+ Plot_dynamic_rad <- ggplot(ori.f3.r, aes(x=DAP, y=count, group=Habitat, col=Habitat, fill=Habitat)) +
+      geom_point(alpha = 0.5, size = 4) +
+      geom_line() +
+  facet_grid(~Plant_species) +
+    ggtitle("Radish - gyrB") +
+  theme(legend.position = "bottom", strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Days after polination") + ylab("Number of ASVs") +
+    scale_fill_manual(values=OriginPalette) + 
+    scale_color_manual(values=OriginPalette) + 
+  facet_zoom2(ylim = c(0, 30), split = TRUE)
+Plot_dynamic_rad
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+Plot_dynamic_bean
+Plot_dynamic_rad
+```
+
+# 9 - Plant specific ASVs, origins
+
+We select only ASVs significantly represented in individual plants : ASV1 (Bean and Radish), ASV2 (Bean), ASV5 (Bean), ASV11 (Bean) 
+
+## 9.1 - Origins
+
+### 9.1.1- Prepare data
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+
+dgyrB_origin_spe <- agg.gyrB
+
+
+#Keep only first rank ASVs
+keepfirst_rank_ASVs <- unique(df.rank.gyrB$rn)
+dgyrB_origin_spe <- prune_taxa(keepfirst_rank_ASVs, dgyrB_origin_spe)
+
+#Plant species
+dgyrB_origin_spe_b <- subset_samples(dgyrB_origin_spe, Plant_species %in% c("Bean"))
+dgyrB_origin_spe_b <- filter_taxa(dgyrB_origin_spe_b, function(x) sum(x) > 0, TRUE)
+dgyrB_origin_spe_r <- subset_samples(dgyrB_origin_spe, Plant_species %in% c("Radish"))
+dgyrB_origin_spe_r <- filter_taxa(dgyrB_origin_spe_r, function(x) sum(x) > 0, TRUE)
+
+#Sources
+dgyrB_origin_spe_b.Fl <- subset_samples(dgyrB_origin_spe_b, Habitats == "Flower")
+dgyrB_origin_spe_b.St <- subset_samples(dgyrB_origin_spe_b, Habitats == "Stem")
+dgyrB_origin_spe_b.Air <- subset_samples(dgyrB_origin_spe_b, Habitats == "Air")
+
+dgyrB_origin_spe_r.Fl <- subset_samples(dgyrB_origin_spe_r, Habitats == "Flower")
+dgyrB_origin_spe_r.St <- subset_samples(dgyrB_origin_spe_r, Habitats == "Stem")
+dgyrB_origin_spe_r.Air <- subset_samples(dgyrB_origin_spe_r, Habitats == "Air")
+
+#Merge sources
+dgyrB_origin_spe_b.Fl.merged <- merge_samples(dgyrB_origin_spe_b.Fl, "Habitats")
+dgyrB_origin_spe_b.St.merged <- merge_samples(dgyrB_origin_spe_b.St, "Habitats")
+dgyrB_origin_spe_b.Air.merged <- merge_samples(dgyrB_origin_spe_b.Air, "Habitats")
+
+dgyrB_origin_spe_r.Fl.merged <- merge_samples(dgyrB_origin_spe_r.Fl, "Habitats")
+dgyrB_origin_spe_r.St.merged <- merge_samples(dgyrB_origin_spe_r.St, "Habitats")
+dgyrB_origin_spe_r.Air.merged <- merge_samples(dgyrB_origin_spe_r.Air, "Habitats")
+
+#Normalisation (#normalisation : we have 30 air samples and 27 Stem and 5 flower samples)
+dgyrB_origin_spe_b.Fl.norm <-transform_sample_counts(dgyrB_origin_spe_b.Fl.merged,function(x)6*x)
+dgyrB_origin_spe_b.St.norm <-transform_sample_counts(dgyrB_origin_spe_b.St.merged,function(x)1.11*x)
+
+#Normalisation (#normalisation : we have 17 air samples and 19 Stem and 5 flower samples)
+dgyrB_origin_spe_r.Fl.norm <-transform_sample_counts(dgyrB_origin_spe_r.Fl.merged,function(x)3.8*x)
+dgyrB_origin_spe_r.Air.merged.norm <-transform_sample_counts(dgyrB_origin_spe_r.Air.merged,function(x)1.12*x)
+
+#merged sources
+dgyrB_origin_spe_b.full <- merge_phyloseq( dgyrB_origin_spe_b.Fl.norm,  dgyrB_origin_spe_b.St.norm, dgyrB_origin_spe_b.Air.merged )
+dgyrB_table_b <- data.frame(t(otu_table(dgyrB_origin_spe_b.full)))
+
+dgyrB_origin_spe_r.full <- merge_phyloseq( dgyrB_origin_spe_r.Fl.norm,  dgyrB_origin_spe_r.St.merged, dgyrB_origin_spe_r.Air.merged.norm )
+dgyrB_table_r <- data.frame(t(otu_table(dgyrB_origin_spe_r.full)))
+
+#Change 0 for better visualization
+dgyrB_table_b[dgyrB_table_b==0] <- 0.05
+dgyrB_table_r[dgyrB_table_r==0] <- 0.05
+
+#Add taxo
+dgyrB.tax.b <- data.frame(tax_table(dgyrB_origin_spe_b.full))
+dgyrB.tax.r <- data.frame(tax_table(dgyrB_origin_spe_r.full))
+
+#Merge table + taxo
+table_f_gyrB_b <- merge(dgyrB_table_b, dgyrB.tax.b, by = "row.names")
+rownames(table_f_gyrB_b) <- table_f_gyrB_b[,1]
+
+table_f_gyrB_r <- merge(dgyrB_table_r, dgyrB.tax.b, by = "row.names")
+rownames(table_f_gyrB_r) <- table_f_gyrB_r[,1]
+```
+
+### 9.1.2 - Ternary plot
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+#Download packages
+library(ggtern)
+library(ggalt)  
+
+table_f_gyrB_b$Plant_Specific_taxa <- ifelse(table_f_gyrB_b$Row.names == "ASV1",'Plant Specific taxa',
+                               ifelse(table_f_gyrB_b$Row.names == "ASV2",'Plant Specific taxa',
+                                      ifelse(table_f_gyrB_b$Row.names == "ASV5",'Plant Specific taxa',
+                                    ifelse(table_f_gyrB_b$Row.names == "ASV11",'Plant Specific taxa','Non Plant Specific taxa'))))
+
+table_f_gyrB_b$Label <- ifelse(table_f_gyrB_b$Row.names == "ASV1",'ASV1',
+                               ifelse(table_f_gyrB_b$Row.names == "ASV2",'ASV2',
+                                      ifelse(table_f_gyrB_b$Row.names == "ASV5",'ASV5',
+                                    ifelse(table_f_gyrB_b$Row.names == "ASV11",'ASV11',''))))
+
+#Plot
+ternary_b_gyrB = ggtern(table_f_gyrB_b ,aes(Flower,Air,Stem)) +
+    theme_bw() +  
+    #theme_legend_position('tr') + 
+    #geom_encircle(alpha=0.5,size=1) + 
+    stat_confidence_tern(geom='polygon',aes(fill=..level..), colour =  "#000000", alpha = 0.05,  breaks = c(0.5, 0.9, 0.95), show.legend = FALSE) + 
+  geom_point(size=6,shape=16, aes(colour=Plant_Specific_taxa)) +
+  scale_color_manual(values = c("#3A748F29", "#5FB404")) + 
+  labs(title    = "Bean - gyrB",
+       subtitle = "", fill = 'Confidence') + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  theme_nomask()  + geom_text(mapping = aes(label = Label), size = 4, vjust = 2.25, hjust = 1.15)
+ternary_b_gyrB
+
+table_f_gyrB_r$Plant_Specific_taxa <-   ifelse(table_f_gyrB_r$Row.names == "ASV1",'Plant Specific taxa','Non Plant Specific taxa')
+
+table_f_gyrB_r$Label <- ifelse(table_f_gyrB_r$Row.names == "ASV1",'ASV1','')
+
+ternary_r_gyrB = ggtern(table_f_gyrB_r ,aes(Flower,Air,Stem)) +
+    theme_bw() +  
+    #theme_legend_position('tr') + 
+    #geom_encircle(alpha=0.5,size=1) + 
+    stat_confidence_tern(geom='polygon',aes(fill=..level..), colour =  "#000000", alpha = 0.05,  breaks = c(0.5, 0.9, 0.95), show.legend = FALSE) + 
+  geom_point(size=6,shape=16, aes(colour=Plant_Specific_taxa)) +
+  scale_color_manual(values = c("#3A748F29", "#DF1111")) + 
+  labs(title    = "Radish - gyrB",
+       subtitle = "", fill = 'Confidence') + theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  theme_nomask() +
+  geom_text(mapping = aes(label = Label), size = 4, vjust = 2.25)
+
+ternary_r_gyrB
+```
+```{r, echo=FALSE, message=FALSE}
+ternary_b_gyrB
+ternary_r_gyrB
+```
+
+
+# 10 - Ecological processes QPE
+
+To analyze ecological processes we worked on the agglomerate dataset (seed per individual plant, see part 7) though QPE framework (Stegen et al., 2013.)
+
+
+## 10.1 - Prepare datasets
+
+Agglomerate all seed at individual plant level.        
+
+Here all seed communities are agglomerate at the individual plant level using all taxa and not only the 1st rank taxa. Since taxa abundance is distorted by the synthetic media (as well as PCR amplification), we first transform taxa abundance in presence/absence by sample and then merged per plant.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+#Need to load first phyloseq objects (part 5)
+design.16S <- data.frame(sample_data(d16S.exp1))
+design.gyrB <- data.frame(sample_data(dgyrB.exp1))
+library(tidyverse)
+design.16S <- design.16S %>% 
+  unite(DAP_Plant, DAP, Plant, sep="_", remove=FALSE) %>%
+  select(Plant.species, DAP_Plant, DAP, Plant, Habitat)
+design.gyrB <- design.gyrB %>% 
+  unite(DAP_Plant, DAP, Plant, sep="_", remove=FALSE) %>%
+  select(Plant.species, DAP_Plant, DAP, Plant, Habitat)
+#Change otu table in presence/absence
+count.16S <- as.data.frame(otu_table(d16S.exp1))
+count.16S[count.16S> 0] <- 1
+d16S.exp1 <- phyloseq(sample_data(design.16S),
+                  tax_table(d16S.exp1),
+                  refseq(d16S.exp1),
+                  phy_tree(d16S.exp1),
+                   otu_table(count.16S, taxa_are_rows = FALSE)) 
+count.gyrB <- as.data.frame(otu_table(dgyrB.exp1))
+count.gyrB[count.gyrB> 0] <- 1
+dgyrB.exp1 <- phyloseq(sample_data(design.gyrB),
+                  tax_table(dgyrB.exp1),
+                  refseq(dgyrB.exp1),
+                  phy_tree(dgyrB.exp1),
+                   otu_table(count.gyrB, taxa_are_rows = FALSE)) 
+#Agglomerate individual seeds at the local plant level.
+d16S.exp1.seed <- subset_samples(d16S.exp1, Habitat =="Seed")
+d16S.exp1.seed.mer <- merge_samples(d16S.exp1.seed, "DAP_Plant")
+dgyrB.exp1.seed <- subset_samples(dgyrB.exp1, Habitat =="Seed")
+dgyrB.exp1.seed.mer <- merge_samples(dgyrB.exp1.seed, "DAP_Plant")
+#Select sources 
+d16S.exp1.other <- subset_samples(d16S.exp1, Habitat !="Seed")
+dgyrB.exp1.other <- subset_samples(dgyrB.exp1, Habitat !="Seed")
+#merge
+otu.seed.16S <- as.data.frame(t(otu_table(d16S.exp1.seed.mer)))
+otu.other.16S <- as.data.frame(t(otu_table(d16S.exp1.other)))
+otu.all.16S <- t(cbind(otu.seed.16S, otu.other.16S))
+design.all.16S <- read.csv("design_habitats_16S.csv", sep=",", header= TRUE, row.names=1)
+otu.seed.gyrB <- as.data.frame(t(otu_table(dgyrB.exp1.seed.mer)))
+otu.other.gyrB <- as.data.frame(t(otu_table(dgyrB.exp1.other)))
+otu.all.gyrB <- t(cbind(otu.seed.gyrB, otu.other.gyrB))
+design.all.gyrB <- read.csv("design_habitats_gyrB.csv", sep=",", header= TRUE, row.names=1)
+#New phyloseq object
+agg.16S <- phyloseq(sample_data(design.all.16S), tax_table(d16S.exp1), phy_tree(d16S.exp1),
+                   otu_table(otu.all.16S, taxa_are_rows = FALSE)) # 452 taxa and 146 samples
+agg.gyrB <- phyloseq(sample_data(design.all.gyrB), tax_table(dgyrB.exp1), phy_tree(dgyrB.exp1),
+                   otu_table(otu.all.gyrB, taxa_are_rows = FALSE)) # 1239 taxa and 146 samples
+#Remove stage B11
+agg.16S <- subset_samples(agg.16S, DAP !="B11")
+agg.16S <- filter_taxa(agg.16S, function(x) sum (x)>0, TRUE) # 452 taxa and 142 samples
+agg.gyrB <- subset_samples(agg.gyrB, DAP !="B11")
+agg.gyrB <- filter_taxa(agg.gyrB, function(x) sum (x)>0, TRUE) # 1239 taxa and 142 samples
+```
+
+Select seed only for each plant species at each sampling time
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+agg.16S.seed <- subset_samples(agg.16S, Habitats == "Seed")
+agg.16S.seed.b27 <- subset_samples(agg.16S.seed, DAP=="D27")
+agg.16S.seed.b27 <- filter_taxa(agg.16S.seed.b27, function(x) sum (x)>0, TRUE) # 90 taxa 6 samples
+agg.16S.seed.b33 <- subset_samples(agg.16S.seed, DAP=="D33")
+agg.16S.seed.b33 <- filter_taxa(agg.16S.seed.b33, function(x) sum (x)>0, TRUE) # 95 taxa 6 samples
+agg.16S.seed.b42 <- subset_samples(agg.16S.seed, DAP=="D42")
+agg.16S.seed.b42 <- filter_taxa(agg.16S.seed.b42, function(x) sum (x)>0, TRUE) # 105 taxa 5 samples
+agg.16S.seed.b50 <- subset_samples(agg.16S.seed, DAP=="D50")
+agg.16S.seed.b50 <- filter_taxa(agg.16S.seed.b50, function(x) sum (x)>0, TRUE) # 154 taxa 7 samples
+agg.16S.seed.r26 <- subset_samples(agg.16S.seed, DAP=="D26")
+agg.16S.seed.r26 <- filter_taxa(agg.16S.seed.r26 , function(x) sum (x)>0, TRUE) # 74 taxa 5 samples
+agg.16S.seed.r37 <- subset_samples(agg.16S.seed, DAP=="D37")
+agg.16S.seed.r37 <- filter_taxa(agg.16S.seed.r37 , function(x) sum (x)>0, TRUE) # 77 taxa 5 samples
+agg.16S.seed.r65 <- subset_samples(agg.16S.seed, DAP=="D65")
+agg.16S.seed.r65 <- filter_taxa(agg.16S.seed.r65, function(x) sum (x)>0, TRUE) # 100 taxa 5 samples
+#gyrB
+agg.gyrB.seed <- subset_samples(agg.gyrB, Habitats == "Seed")
+agg.gyrB.seed.b27 <- subset_samples(agg.gyrB.seed, DAP=="D27")
+agg.gyrB.seed.b27 <- filter_taxa(agg.gyrB.seed.b27, function(x) sum (x)>0, TRUE) # 141 taxa 6 samples
+agg.gyrB.seed.b33 <- subset_samples(agg.gyrB.seed, DAP=="D33")
+agg.gyrB.seed.b33 <- filter_taxa(agg.gyrB.seed.b33, function(x) sum (x)>0, TRUE) # 211 taxa 6 samples
+agg.gyrB.seed.b42 <- subset_samples(agg.gyrB.seed, DAP=="D42")
+agg.gyrB.seed.b42 <- filter_taxa(agg.gyrB.seed.b42, function(x) sum (x)>0, TRUE) # 248 taxa 5 samples
+agg.gyrB.seed.b50 <- subset_samples(agg.gyrB.seed, DAP=="D50")
+agg.gyrB.seed.b50 <- filter_taxa(agg.gyrB.seed.b50, function(x) sum (x)>0, TRUE) # 384 taxa 7 samples
+agg.gyrB.seed.r26 <- subset_samples(agg.gyrB.seed, DAP=="D26")
+agg.gyrB.seed.r26 <- filter_taxa(agg.gyrB.seed.r26 , function(x) sum (x)>0, TRUE) # 66 taxa 5 samples
+agg.gyrB.seed.r37 <- subset_samples(agg.gyrB.seed, DAP=="D37")
+agg.gyrB.seed.r37 <- filter_taxa(agg.gyrB.seed.r37 , function(x) sum (x)>0, TRUE) # 93 taxa 5 samples
+agg.gyrB.seed.r65 <- subset_samples(agg.gyrB.seed, DAP=="D65")
+agg.gyrB.seed.r65 <- filter_taxa(agg.gyrB.seed.r65, function(x) sum (x)>0, TRUE) # 187 taxa 5 samples
+```
+
+## 10.2 - Raup-Crick Index (RCI)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+source("/Users/guchesneau/Documents/These2/Script R/F2S-diversite/F2S-year-4/RIC_beta_null/RIC_betanull.R")
+#16S
+RCI_b27 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.b27)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b27) <- NA
+RCI_b27 <- as.data.frame(RCI_b27)
+RCI_b27_16S <- RCI_b27 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b27, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_b33 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.b33)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b33) <- NA
+RCI_b33 <- as.data.frame(RCI_b33)
+RCI_b33_16S <- RCI_b33 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b33, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_b42 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.b42)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b42) <- NA
+RCI_b42 <- as.data.frame(RCI_b42)
+RCI_b42_16S <- RCI_b42 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b42, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_b50 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.b50)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b50) <- NA
+RCI_b50 <- as.data.frame(RCI_b50)
+RCI_b50_16S <- RCI_b50 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b50, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_r26 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.r26)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_r26) <- NA
+RCI_r26 <- as.data.frame(RCI_r26)
+RCI_r26_16S <- RCI_r26 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_r26, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_r37 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.r37)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_r37) <- NA
+RCI_r37 <- as.data.frame(RCI_r37)
+RCI_r37_16S <- RCI_r37 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_r37, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_r65 <-  as.matrix(raup_crick(data.frame(otu_table(agg.16S.seed.r65)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_r65) <- NA
+RCI_r65 <- as.data.frame(RCI_r65)
+RCI_r65_16S <- RCI_r65 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_r65, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+
+#gyrB
+RCI_b27 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.b27)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b27) <- NA
+RCI_b27 <- as.data.frame(RCI_b27)
+RCI_b27_gyrB <- RCI_b27 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b27, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_b33 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.b33)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b33) <- NA
+RCI_b33 <- as.data.frame(RCI_b33)
+RCI_b33_gyrB <- RCI_b33 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b33, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_b42 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.b42)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b42) <- NA
+RCI_b42 <- as.data.frame(RCI_b42)
+RCI_b42_gyrB <- RCI_b42 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b42, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_b50 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.b50)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_b50) <- NA
+RCI_b50 <- as.data.frame(RCI_b50)
+RCI_b50_gyrB <- RCI_b50 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_b50, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_r26 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.r26)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_r26) <- NA
+RCI_r26 <- as.data.frame(RCI_r26)
+RCI_r26_gyrB <- RCI_r26 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_r26, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_r37 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.r37)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_r37) <- NA
+RCI_r37 <- as.data.frame(RCI_r37)
+RCI_r37_gyrB <- RCI_r37 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_r37, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+RCI_r65 <-  as.matrix(raup_crick(data.frame(otu_table(agg.gyrB.seed.r65)), plot_names_in_col1=FALSE, classic_metric=FALSE, split_ties=TRUE, reps=1000, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE))
+diag(RCI_r65) <- NA
+RCI_r65 <- as.data.frame(RCI_r65)
+RCI_r65_gyrB <- RCI_r65 %>% rownames_to_column(var="DAP") %>% mutate(mean_RCI=rowMeans(RCI_r65, na.rm=TRUE)) %>% select (DAP, mean_RCI)
+
+#Bind
+bean.RCI.16S <- bind_rows(RCI_b27_16S, RCI_b33_16S, RCI_b42_16S, RCI_b50_16S)
+rad.RCI.16S <- bind_rows(RCI_r26_16S, RCI_r37_16S, RCI_r65_16S)
+bean.RCI.gyrB <- bind_rows(RCI_b27_gyrB, RCI_b33_gyrB, RCI_b42_gyrB, RCI_b50_gyrB)
+rad.RCI.gyrB <- bind_rows(RCI_r26_gyrB, RCI_r37_gyrB, RCI_r65_gyrB)
+```
+
+## 10.3 - Beta Nearest taxon Index (BNTI)
+```{r echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+library(picante)
+#16S
+bean.otu.b27 <- data.frame(otu_table(agg.16S.seed.b27))
+bean.phy.b27 <- phy_tree(agg.16S.seed.b27)
+bean.otu.b33 <- data.frame(otu_table(agg.16S.seed.b33))
+bean.phy.b33 <- phy_tree(agg.16S.seed.b33)
+bean.otu.b42 <- data.frame(otu_table(agg.16S.seed.b42))
+bean.phy.b42 <- phy_tree(agg.16S.seed.b42)
+bean.otu.b50 <- data.frame(otu_table(agg.16S.seed.b50))
+bean.phy.b50 <- phy_tree(agg.16S.seed.b50)
+rad.otu.r26 <- data.frame(otu_table(agg.16S.seed.r26))
+rad.phy.r26 <- phy_tree(agg.16S.seed.r26)
+rad.otu.r37 <- data.frame(otu_table(agg.16S.seed.r37))
+rad.phy.r37 <- phy_tree(agg.16S.seed.r37)
+rad.otu.r65 <- data.frame(otu_table(agg.16S.seed.r65))
+rad.phy.r65 <- phy_tree(agg.16S.seed.r65)
+#Check order
+bean.otu.b27 <- bean.otu.b27[,bean.phy.b27$tip.label]
+bean.otu.b33 <- bean.otu.b33[,bean.phy.b33$tip.label]
+bean.otu.b42 <- bean.otu.b42[,bean.phy.b42$tip.label]
+bean.otu.b50 <- bean.otu.b50[,bean.phy.b50$tip.label]
+rad.otu.r26 <- rad.otu.r26[,rad.phy.r26$tip.label]
+rad.otu.r37 <- rad.otu.r37[,rad.phy.r37$tip.label]
+rad.otu.r65 <- rad.otu.r65[,rad.phy.r65$tip.label]
+#Calculate mean nearest taxon distance (MNTD) (Webb et al. 2002)
+bean.dist.b27 <- cophenetic(bean.phy.b27)
+bean.mntd.b27 <-mntd(bean.otu.b27, bean.dist.b27)
+bean.dist.b33 <- cophenetic(bean.phy.b33)
+bean.mntd.b33 <-mntd(bean.otu.b33, bean.dist.b33)
+bean.dist.b42 <- cophenetic(bean.phy.b42)
+bean.mntd.b42 <-mntd(bean.otu.b42, bean.dist.b42)
+bean.dist.b50 <- cophenetic(bean.phy.b50)
+bean.mntd.b50 <-mntd(bean.otu.b50, bean.dist.b50)
+rad.dist.r26 <- cophenetic(rad.phy.r26)
+rad.mntd.r26 <-mntd(rad.otu.r26, rad.dist.r26)
+rad.dist.r37 <- cophenetic(rad.phy.r37)
+rad.mntd.r37 <-mntd(rad.otu.r37, rad.dist.r37)
+rad.dist.r65 <- cophenetic(rad.phy.r65)
+rad.mntd.r65 <-mntd(rad.otu.r65, rad.dist.r65)
+#Calculate nearest taxon index (NTI)
+bean.ses.mntd.b27 <-ses.mntd(bean.otu.b27, bean.dist.b27, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+bean.ses.mntd.b33 <-ses.mntd(bean.otu.b33, bean.dist.b33, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+bean.ses.mntd.b42 <-ses.mntd(bean.otu.b42, bean.dist.b42, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+bean.ses.mntd.b50 <-ses.mntd(bean.otu.b50, bean.dist.b50, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+rad.ses.mntd.r26 <-ses.mntd(rad.otu.r26, rad.dist.r26, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+rad.ses.mntd.r37 <-ses.mntd(rad.otu.r37, rad.dist.r37, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+rad.ses.mntd.r65 <-ses.mntd(rad.otu.r65, rad.dist.r65, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+#Bind 
+bean.BNTI.16S <- rbind(bean.ses.mntd.b27, bean.ses.mntd.b33, bean.ses.mntd.b42, bean.ses.mntd.b50)
+rad.BNTI.16S <- rbind(rad.ses.mntd.r26, rad.ses.mntd.r37, rad.ses.mntd.r65)
+#gyrB
+bean.otu.b27 <- data.frame(otu_table(agg.gyrB.seed.b27))
+bean.phy.b27 <- phy_tree(agg.gyrB.seed.b27)
+bean.otu.b33 <- data.frame(otu_table(agg.gyrB.seed.b33))
+bean.phy.b33 <- phy_tree(agg.gyrB.seed.b33)
+bean.otu.b42 <- data.frame(otu_table(agg.gyrB.seed.b42))
+bean.phy.b42 <- phy_tree(agg.gyrB.seed.b42)
+bean.otu.b50 <- data.frame(otu_table(agg.gyrB.seed.b50))
+bean.phy.b50 <- phy_tree(agg.gyrB.seed.b50)
+rad.otu.r26 <- data.frame(otu_table(agg.gyrB.seed.r26))
+rad.phy.r26 <- phy_tree(agg.gyrB.seed.r26)
+rad.otu.r37 <- data.frame(otu_table(agg.gyrB.seed.r37))
+rad.phy.r37 <- phy_tree(agg.gyrB.seed.r37)
+rad.otu.r65 <- data.frame(otu_table(agg.gyrB.seed.r65))
+rad.phy.r65 <- phy_tree(agg.gyrB.seed.r65)
+#Check order
+bean.otu.b27 <- bean.otu.b27[,bean.phy.b27$tip.label]
+bean.otu.b33 <- bean.otu.b33[,bean.phy.b33$tip.label]
+bean.otu.b42 <- bean.otu.b42[,bean.phy.b42$tip.label]
+bean.otu.b50 <- bean.otu.b50[,bean.phy.b50$tip.label]
+rad.otu.r26 <- rad.otu.r26[,rad.phy.r26$tip.label]
+rad.otu.r37 <- rad.otu.r37[,rad.phy.r37$tip.label]
+rad.otu.r65 <- rad.otu.r65[,rad.phy.r65$tip.label]
+#Calculate mean nearest taxon distance (MNTD) (Webb et al. 2002)
+bean.dist.b27 <- cophenetic(bean.phy.b27)
+bean.mntd.b27 <-mntd(bean.otu.b27, bean.dist.b27)
+bean.dist.b33 <- cophenetic(bean.phy.b33)
+bean.mntd.b33 <-mntd(bean.otu.b33, bean.dist.b33)
+bean.dist.b42 <- cophenetic(bean.phy.b42)
+bean.mntd.b42 <-mntd(bean.otu.b42, bean.dist.b42)
+bean.dist.b50 <- cophenetic(bean.phy.b50)
+bean.mntd.b50 <-mntd(bean.otu.b50, bean.dist.b50)
+rad.dist.r26 <- cophenetic(rad.phy.r26)
+rad.mntd.r26 <-mntd(rad.otu.r26, rad.dist.r26)
+rad.dist.r37 <- cophenetic(rad.phy.r37)
+rad.mntd.r37 <-mntd(rad.otu.r37, rad.dist.r37)
+rad.dist.r65 <- cophenetic(rad.phy.r65)
+rad.mntd.r65 <-mntd(rad.otu.r65, rad.dist.r65)
+#Calculate nearest taxon index (NTI)
+bean.ses.mntd.b27 <-ses.mntd(bean.otu.b27, bean.dist.b27, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+bean.ses.mntd.b33 <-ses.mntd(bean.otu.b33, bean.dist.b33, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+bean.ses.mntd.b42 <-ses.mntd(bean.otu.b42, bean.dist.b42, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+bean.ses.mntd.b50 <-ses.mntd(bean.otu.b50, bean.dist.b50, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+rad.ses.mntd.r26 <-ses.mntd(rad.otu.r26, rad.dist.r26, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+rad.ses.mntd.r37 <-ses.mntd(rad.otu.r37, rad.dist.r37, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+rad.ses.mntd.r65 <-ses.mntd(rad.otu.r65, rad.dist.r65, null.model = "taxa.labels", abundance.weighted = TRUE, runs = 1000)
+#Bind 
+bean.BNTI.gyrB <- rbind(bean.ses.mntd.b27, bean.ses.mntd.b33, bean.ses.mntd.b42, bean.ses.mntd.b50)
+rad.BNTI.gyrB <- rbind(rad.ses.mntd.r26, rad.ses.mntd.r37, rad.ses.mntd.r65)
+```
+
+## 10.4 - Combine RCI and BNTI
+```{r echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+library(tidyverse)
+bean.QPE.16S <- cbind(bean.BNTI.16S, bean.RCI.16S)
+bean.QPE.16S$Plant.Species <- c("Bean")
+rad.QPE.16S <- cbind(rad.BNTI.16S, rad.RCI.16S)
+rad.QPE.16S$Plant.Species <- c("Radish")
+bean.QPE.gyrB <- cbind(bean.BNTI.gyrB, bean.RCI.gyrB)
+bean.QPE.gyrB$Plant.Species <- c("Bean")
+rad.QPE.gyrB <- cbind(rad.BNTI.gyrB, rad.RCI.gyrB)
+rad.QPE.gyrB$Plant.Species <- c("Radish")
+
+#Bind Bean and Radish
+QPE_final_16S <- rbind(bean.QPE.16S, rad.QPE.16S)
+QPE_final_gyrB <- rbind(bean.QPE.gyrB, rad.QPE.gyrB)
+
+#create bornes according to significance
+QPE_final_16S$mntd.obs.z.cat<-ifelse(QPE_final_16S$mntd.obs.z<= -2,'[-Inf,-2]',
+                             ifelse(QPE_final_16S$mntd.obs.z> -2&QPE_final_16S$mntd.obs.z< 2,'[-2,2]',
+                                    ifelse(QPE_final_16S$mntd.obs.z>=2,'[2,+Inf]','[2,+Inf]')))
+
+QPE_final_16S$Ric.cat<-ifelse(QPE_final_16S$mean_RCI <= -0.95,'[-1,-0.95]',
+                      ifelse(QPE_final_16S$mean_RCI > -0.95&QPE_final_16S$mean_RCI< 0.95,'[-0.95,0.95]',
+                             ifelse(QPE_final_16S$mean_RCI >= 0.95,'[0.95,1]','[0.95,1]')))
+
+QPE_final_gyrB$mntd.obs.z.cat<-ifelse(QPE_final_gyrB$mntd.obs.z<= -2,'[-Inf,-2]',
+                             ifelse(QPE_final_gyrB$mntd.obs.z> -2&QPE_final_gyrB$mntd.obs.z< 2,'[-2,2]',
+                                    ifelse(QPE_final_gyrB$mntd.obs.z>=2,'[2,+Inf]','[2,+Inf]')))
+
+QPE_final_gyrB$Ric.cat<-ifelse(QPE_final_gyrB$mean_RCI <= -0.95,'[-1,-0.95]',
+                      ifelse(QPE_final_gyrB$mean_RCI > -0.95&QPE_final_gyrB$mean_RCI< 0.95,'[-0.95,0.95]',
+                             ifelse(QPE_final_gyrB$mean_RCI >= 0.95,'[0.95,1]','[0.95,1]')))
+
+#Combine indexes in one column
+QPE_final_16S <- unite(QPE_final_16S,mntd.obs.z.cat,Ric.cat ,col="BNTI_and_RCI", sep=" and ")
+QPE_final_gyrB <- unite(QPE_final_gyrB,mntd.obs.z.cat,Ric.cat ,col="BNTI_and_RCI", sep=" and ")
+
+#Change legend name
+
+QPE_final_16S$Processus[QPE_final_16S$mntd.obs.z > 2] <-"Variable Selection"
+QPE_final_16S$Processus[QPE_final_16S$mntd.obs.z < -2] <-"Homogeneous Selection"
+QPE_final_16S$Processus[QPE_final_16S$BNTI_and_RCI == "[-2,2] and [0.95,1]"] <-"Dispersal limitation"
+QPE_final_16S$Processus[QPE_final_16S$BNTI_and_RCI == "[-2,2] and -1,-0.95]"] <-"Homogenizing dispersal"
+QPE_final_16S$Processus[QPE_final_16S$BNTI_and_RCI == "[-2,2] and [-0.95,0.95]"] <-"Drift"
+
+QPE_final_gyrB$Processus[QPE_final_gyrB$mntd.obs.z > 2] <-"Variable Selection"
+QPE_final_gyrB$Processus[QPE_final_gyrB$mntd.obs.z < -2] <-"Homogeneous Selection"
+QPE_final_gyrB$Processus[QPE_final_gyrB$BNTI_and_RCI == "[-2,2] and [0.95,1]"] <-"Dispersal limitation"
+QPE_final_gyrB$Processus[QPE_final_gyrB$BNTI_and_RCI == "[-2,2] and -1,-0.95]"] <-"Homogenizing dispersal"
+QPE_final_gyrB$Processus[QPE_final_gyrB$BNTI_and_RCI == "[-2,2] and [-0.95,0.95]"] <-"Drift"
+
+#Separate DAP and Plant
+QPE_final_16S <- QPE_final_16S %>%separate(DAP, c("DAP", "Plant"), "_")
+QPE_final_gyrB <- QPE_final_gyrB %>%separate(DAP, c("DAP", "Plant"), "_")
+```
+
+
+## 10.5 - Plot QPE
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+#Prepare palette color for habitats
+
+  name_DAP <- c("D02","D27", "D33", "D42", "D50", "D03","D26", "D37", "D65")
+  
+  # desired color palette
+  DAPPalette <- c( "#F0FEEF","#F5F6CE", "#D0F5A9", "#5FB404", "#0B610B","#FFF8EC", "#F6E3CE", "#FAAC58", "#DF3A01")
+  
+  # associated EnvType level
+  names(DAPPalette) <- name_DAP
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide", fig.show='hide'}
+#Plot 16S
+
+QPE_final_16S$DAP <- factor(QPE_final_16S$DAP, 
+                         levels = c("D27", "D33", "D42", "D50", "D26", "D37", "D65"))
+
+FigNTI <- ggplot(data=QPE_final_16S, aes(x=as.character(DAP), y=mntd.obs.z))+
+  geom_boxplot(aes(fill=DAP), alpha = 0.6)+ 
+  geom_jitter(width=0.15, alpha = 0.4)+
+    scale_fill_manual(values=DAPPalette) + 
+    scale_color_manual(values=DAPPalette) + 
+    geom_hline(yintercept = c(0), color="#37286C", linetype="dashed")+ 
+  geom_hline(yintercept = c(-2), color="black", linetype="dashed")+ 
+  scale_y_continuous(name="Incidence Based b diversity (BNTI)")+
+  theme_bw()+ facet_grid(~Plant.Species, scales = "free") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+  xlab ("Days after polination") +
+       ggtitle("BNTI - 16S")
+FigNTI
+
+FigRCI <- ggplot(data=QPE_final_16S, aes(x=as.character(DAP), y=mean_RCI))+
+  geom_boxplot(aes(fill=DAP), alpha = 0.6)+ 
+  geom_jitter(width=0.15, alpha = 0.4)+
+  scale_x_discrete(name="Days after polination")+
+    scale_fill_manual(values=DAPPalette) + 
+    scale_color_manual(values=DAPPalette) + 
+  geom_hline(yintercept = c(0.95, -0.95), linetype="dashed")+ 
+  scale_y_continuous(name="Raup-Crick Index (RCI)")+
+  theme_bw()+ facet_grid(~Plant.Species, scales = "free") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Days after polination") +
+  ggtitle("RCI - 16S")
+FigRCI
+
+#Plot QPE
+
+Plot_QPE_tot_16S_full <- ggplot(data = QPE_final_16S, aes(x=DAP, fill = Processus)) +
+  geom_bar(position = "fill") + theme_bw() +
+  scale_x_discrete(name="Days after polination")+
+  scale_y_continuous(name="Relative Abundance") + 
+  facet_grid(~Plant.Species, scales = "free") + 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Days after polination") +
+  guides(colour = guide_legend(nrow = 1)) +
+  scale_fill_manual(values=c("#0288D1","#12964D",  "#F7D358")) + ggtitle("QPE - 16S")
+Plot_QPE_tot_16S_full
+
+#Plot gyrB
+
+QPE_final_gyrB$DAP <- factor(QPE_final_gyrB$DAP, 
+                         levels = c("D27", "D33", "D42", "D50", "D26", "D37", "D65"))
+
+FigNTI_gyrB <- ggplot(data=QPE_final_gyrB, aes(x=as.character(DAP), y=mntd.obs.z))+
+  geom_boxplot(aes(fill=DAP), alpha = 0.6)+ 
+  geom_jitter(width=0.15, alpha = 0.4)+
+  scale_x_discrete(name="Days after polination")+
+    scale_fill_manual(values=DAPPalette) + 
+    scale_color_manual(values=DAPPalette) + 
+   geom_hline(yintercept = c(0), color="#37286C", linetype="dashed")+ 
+  geom_hline(yintercept = c(-2), color="black", linetype="dashed")+ 
+  scale_y_continuous(name="Incidence Based b diversity (BNTI)")+
+  theme_bw()+ facet_grid(~Plant.Species, scales = "free") + 
+  theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+      xlab ("Days after polination") +
+  ggtitle("BNTI - gyrB")
+FigNTI_gyrB
+
+FigRCI_gyrB <- ggplot(data=QPE_final_gyrB, aes(x=as.character(DAP), y=mean_RCI))+
+  geom_boxplot(aes(fill=DAP), alpha = 0.6)+ 
+  geom_jitter(width=0.15, alpha = 0.4)+
+  scale_x_discrete(name="Days after polination")+
+    scale_fill_manual(values=DAPPalette) + 
+    scale_color_manual(values=DAPPalette) + 
+  geom_hline(yintercept = c(0.95, -0.95), linetype="dashed")+ 
+  scale_y_continuous(name="Raup-Crick Index (RCI)")+
+  theme_bw()+ facet_grid(~Plant.Species, scales = "free") + 
+   theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Days after polination") +
+  ggtitle("RCI - gyrB")
+FigRCI_gyrB
+
+#Plot QPE
+
+Plot_QPE_tot_gyrB_full <- ggplot(data = QPE_final_gyrB, aes(x=DAP, fill = Processus)) +
+  geom_bar(position = "fill") + theme_bw() +
+  scale_x_discrete(name="Days after polination")+
+  scale_y_continuous(name="Relative Abundance") + 
+  facet_grid(~Plant.Species, scales = "free") + 
+    theme(strip.background = element_rect(color="white", fill="#585858", size=1, linetype="solid"),
+        strip.text.x = element_text(size = 12, color = "white"),
+        axis.title.x = element_text( size = 12, face = "bold"),
+        axis.title.y = element_text( size = 12, face = "bold"),
+        plot.title = element_text(size = 16),
+        axis.text.x = element_text(face = "bold"), 
+        axis.text.y = element_text(face = "bold")) +
+    xlab ("Days after polination") +
+  guides(colour = guide_legend(nrow = 1)) +
+  scale_fill_manual(values=c("#0288D1","#12964D",  "#F7D358")) + ggtitle("QPE - gyrB")
+Plot_QPE_tot_gyrB_full
+```
+
+```{r, echo=FALSE, message=FALSE}
+FigNTI
+FigNTI_gyrB
+
+FigRCI
+FigRCI_gyrB
+
+Plot_QPE_tot_16S_full
+Plot_QPE_tot_gyrB_full
+```
+
+*****
+
+# End of script
+
+Chesneau et al., 2021     
+title: "Single seed microbiota: assembly and transmission from parent plant to seedling"      
+
